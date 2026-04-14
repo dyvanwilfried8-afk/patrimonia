@@ -256,9 +256,12 @@
     const { createClient } = supabase;
     const sb = createClient(SUPABASE_URL, SUPABASE_ANON);
 
-    // Rediriger vers le dashboard si déjà connecté
-    sb.auth.getSession().then(({ data: { session } }) => {
-      if (session) window.location.href = 'dashboard.html';
+    // Écouteur de session global pour redirection automatique
+    sb.auth.onAuthStateChange((event, session) => {
+      if (session) {
+        console.log("Session détectée, redirection vers dashboard.html...");
+        window.location.assign('dashboard.html');
+      }
     });
 
     function switchTab(t){
@@ -278,9 +281,10 @@
       const btn = document.querySelector('#loginForm .btn-primary');
       btn.textContent = 'Connexion…'; btn.disabled = true;
       const { error } = await sb.auth.signInWithPassword({ email, password: pass });
-      btn.textContent = 'Accéder →'; btn.disabled = false;
-      if(error){ err.textContent = 'Email ou mot de passe incorrect.'; return; }
-      window.location.href = 'dashboard.html';
+      if(error){ 
+        err.textContent = 'Email ou mot de passe incorrect.'; 
+        btn.textContent = 'Accéder →'; btn.disabled = false;
+      }
     }
 
     async function doRegister(){
@@ -298,7 +302,11 @@
       btn.textContent = 'Création…'; btn.disabled = true;
       
       // Inscription
-      const { data, error } = await sb.auth.signUp({ email, password: pass });
+      const { data, error } = await sb.auth.signUp({ 
+          email, 
+          password: pass,
+          options: { emailRedirectTo: window.location.origin }
+      });
       
       if(error){ 
         btn.textContent = 'Créer mon espace →'; btn.disabled = false;
@@ -306,15 +314,12 @@
         return; 
       }
 
-      // Si la session existe (confirm email OFF), on redirige de suite
+      // Gestion de la réussite
+      err.style.color = 'var(--accent2)';
       if(data.session) {
-        err.style.color = 'var(--accent2)';
         err.textContent = 'Succès ! Redirection...';
-        window.location.href = 'dashboard.html';
       } else {
-        err.style.color = 'var(--accent2)';
-        err.textContent = 'Compte créé ! Redirection en cours...';
-        setTimeout(() => window.location.href = 'dashboard.html', 1000);
+        err.textContent = 'Compte créé ! Vérifiez vos emails ou connectez-vous.';
       }
     }
 
