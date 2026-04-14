@@ -32,24 +32,40 @@ async function initApp() {
 }
 
 // ── DATA HELPERS (Supabase) ──────────────────────────────────
-// Toutes les données sont préchargées dans _cache au démarrage.
-// getData() est synchrone (lecture cache). setData() est synchrone
-// pour le cache + envoie à Supabase en arrière-plan (fire & forget).
+// ── DATA HELPERS (Supabase) ──────────────────────────────────
 const _cache = {};
 
-function getData(k, fallback = null) {
-  const v = _cache[k];
-  return v !== undefined ? v : fallback;
+async function loadAllData() {
+  try {
+    // 1. Charger le profil (Salaire et Paramètres)
+    const { data: profile } = await sb.from('user_data').select('*').eq('user_id', currentUser).single();
+    if (profile) {
+      salary = profile.salary;
+      settings = profile.settings;
+    }
+
+    // 2. Charger les Actifs
+    const { data: assetData } = await sb.from('assets').select('*').eq('user_id', currentUser);
+    assets = assetData || [];
+
+    // 3. Charger les Dépenses
+    const { data: expenseData } = await sb.from('expenses').select('*').eq('user_id', currentUser);
+    expenses = expenseData || [];
+
+  } catch (e) { console.error('Erreur chargement:', e); }
 }
 
-function setData(k, v) {
-  _cache[k] = v;
-  if (currentUser) {
-    sb.from('user_data').upsert(
-      { user_id: currentUser, key: k, value: v, updated_at: new Date().toISOString() },
-      { onConflict: 'user_id,key' }
-    ).then(({ error }) => {
-      if (error) console.error('setData error', k, error);
+async function saveAsset(asset) {
+  await sb.from('assets').upsert({ ...asset, user_id: currentUser });
+}
+
+async function saveSalary() {
+  await sb.from('user_data').upsert({ 
+    user_id: currentUser, 
+    salary: salary, 
+    settings: settings 
+  });
+}
     });
   }
 }
