@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Patrimonia</title>
 
-  <!-- PWA -->
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#0b0b0f" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -32,2699 +31,402 @@
       src: local('Aptos SemiBold'), local('Aptos-SemiBold');
       font-weight: 600;
     }
-  </style>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-    /* ══ DARK MODE (défaut) ══ */
+    /* Variables & Themes */
     :root {
-      --bg:       #0b0b0f;
-      --surface:  #111116;
+      --bg: #0b0b0f;
+      --surface: #111116;
       --surface2: #18181f;
-      --surface3: #1f1f28;
-      --border:   rgba(255,255,255,0.07);
-      --border2:  rgba(255,255,255,0.13);
-      --accent:   #8b5cf6;
-      --accent2:  #a78bfa;
-      --accent3:  #c4b5fd;
-      --green:    #22c55e;
-      --text:     #f0f2f5;
-      --text2:    #c8d0dc;
-      --muted:    #52525b;
-      --muted2:   #71717a;
-      --red:      #ef4444;
-      --danger:   #ef4444;
-      --gold:     #f59e0b;
-      --shadow:   0 1px 3px rgba(0,0,0,0.4), 0 4px 16px rgba(0,0,0,0.3);
-      --shadow-lg:0 8px 32px rgba(0,0,0,0.5);
-      --radius:   10px;
-      --sidebar:  220px;
-      --glow: rgba(37,99,235,0.10);
+      --surface3: #1e1e26;
+      --border: rgba(255, 255, 255, 0.06);
+      --border2: rgba(255, 255, 255, 0.12);
+      --accent: #8b5cf6;
+      --accent-soft: rgba(139, 92, 246, 0.15);
+      --text: #e8edf5;
+      --text2: #a8b4c8;
+      --muted: #52525b;
+      --muted2: #3f3f46;
+      --green: #22c55e;
+      --red: #ef4444;
+      --gold: #f59e0b;
+      --sidebar-w: 260px;
     }
 
-    /* ══ LIGHT MODE ══ */
     :root[data-theme="light"] {
-      --bg:       #f4f5f7;
-      --surface:  #ffffff;
+      --bg: #f4f5f7;
+      --surface: #ffffff;
       --surface2: #f0f1f4;
-      --surface3: #e8eaf0;
-      --border:   rgba(0,0,0,0.08);
-      --border2:  rgba(0,0,0,0.14);
-      --accent:   #7c3aed;
-      --accent2:  #6d28d9;
-      --accent3:  #5b21b6;
-      --green:    #16a34a;
-      --text:     #111827;
-      --text2:    #374151;
-      --muted:    #9ca3af;
-      --muted2:   #6b7280;
-      --red:      #dc2626;
-      --danger:   #dc2626;
-      --gold:     #d97706;
-      --shadow:   0 1px 3px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.06);
-      --shadow-lg:0 8px 24px rgba(0,0,0,0.12);
-      --glow: rgba(37,99,235,0.04);
+      --surface3: #e5e7eb;
+      --border: rgba(0, 0, 0, 0.08);
+      --border2: rgba(0, 0, 0, 0.14);
+      --accent: #7c3aed;
+      --accent-soft: rgba(124, 58, 237, 0.1);
+      --text: #111827;
+      --text2: #374151;
+      --muted: #9ca3af;
+      --muted2: #d1d5db;
     }
 
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
     body {
-      font-family: 'Aptos', 'Segoe UI', 'Inter', system-ui, sans-serif;
-      font-weight: 400;
+      font-family: 'Aptos', 'Inter', sans-serif;
       background: var(--bg);
       color: var(--text);
-      min-height: 100vh;
+      overflow: hidden; /* Sidebar + Main scroll indépendant */
       display: flex;
-      overflow-x: hidden;
-      width: 100%;
-      transition: background 0.25s ease, color 0.25s ease;
+      height: 100vh;
     }
 
-    /* Ambient glow */
-    body::before {
-      content: '';
-      position: fixed; inset: 0;
-      background:
-        radial-gradient(ellipse 60% 50% at 5% 5%, var(--glow) 0%, transparent 60%),
-        radial-gradient(ellipse 40% 60% at 95% 95%, var(--glow) 0%, transparent 60%);
-      pointer-events: none;
-      z-index: 0;
-      transition: opacity 0.3s;
-    }
-
-    /* Grid (dark only) */
-    body::after {
-      content: '';
-      position: fixed; inset: 0;
-      background-image:
-        linear-gradient(rgba(59,130,246,0.025) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(59,130,246,0.025) 1px, transparent 1px);
-      background-size: 50px 50px;
-      pointer-events: none;
-      z-index: 0;
-      opacity: 1;
-      transition: opacity 0.3s;
-    }
-    :root[data-theme="light"] body::after { opacity: 0; }
-
-    /* ── SIDEBAR (masquée — remplacée par bottom nav) ── */
+    /* Sidebar */
     .sidebar {
-      display: none; /* On cache la sidebar latérale */
-    }
-    .sidebar-overlay { display: none !important; }
-
-    /* ── MAIN — plein écran ── */
-    .main {
-      margin-left: 0;
-      flex: 1;
+      width: var(--sidebar-w);
+      background: var(--surface);
+      border-right: 1px solid var(--border);
       display: flex;
       flex-direction: column;
-      min-height: 100vh;
-      width: 100%;
-      max-width: 100%;
-      overflow-x: hidden;
-      padding-bottom: 72px; /* espace pour la bottom nav */
+      z-index: 100;
+      transition: transform 0.3s ease;
     }
 
-    .topbar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 20px;
-      border-bottom: 1px solid var(--border);
-      background: var(--surface);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      position: sticky;
-      top: 0;
-      z-index: 50;
-      height: 58px;
-      box-shadow: var(--shadow);
-      transition: background 0.25s, border-color 0.25s;
-    }
-
-    .topbar-title {
-      font-family: 'Aptos', 'Segoe UI', 'Inter', system-ui, sans-serif;
-      font-size: 15px;
-      font-weight: 400;
-      color: var(--muted2);
-    }
-
-    .topbar-right {
+    .sidebar-header {
+      padding: 24px;
       display: flex;
       align-items: center;
       gap: 12px;
+      border-bottom: 1px solid var(--border);
     }
+    .logo-box {
+      width: 32px; height: 32px;
+      background: var(--accent);
+      border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+    }
+    .logo-box svg { width: 18px; height: 18px; fill: none; stroke: #fff; stroke-width: 2; }
+    .brand-name { font-size: 18px; font-weight: 600; letter-spacing: -0.5px; }
+    .brand-name span { font-weight: 400; color: var(--text2); }
 
-    .refresh-btn {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      color: var(--muted2);
-      padding: 7px 14px;
+    .nav { flex: 1; padding: 20px 12px; overflow-y: auto; }
+    .nav-group { margin-bottom: 24px; }
+    .nav-label { font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; padding: 0 12px 8px; }
+    .nav-item {
+      display: flex; align-items: center; gap: 12px;
+      padding: 10px 12px;
       border-radius: 8px;
-      font-size: 12px;
-      cursor: pointer;
-      font-family: 'Aptos', 'Segoe UI', 'Inter', system-ui, sans-serif; font-weight: 400;
+      color: var(--text2);
+      text-decoration: none;
+      font-size: 13px;
+      margin-bottom: 2px;
       transition: all 0.2s;
+      cursor: pointer;
     }
+    .nav-item:hover { background: var(--surface2); color: var(--text); }
+    .nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+    .nav-item svg { width: 18px; height: 18px; opacity: 0.7; }
 
-    .refresh-btn:hover { }
+    .sidebar-footer { padding: 16px; border-top: 1px solid var(--border); }
+    .user-pill {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px; border-radius: 8px; background: var(--surface2);
+      margin-bottom: 12px;
+    }
+    .avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--surface3); display: flex; align-items: center; justify-content: center; font-size: 12px; border: 1px solid var(--border); }
+    .user-info { flex: 1; min-width: 0; }
+    .user-name { font-size: 12px; font-weight: 500; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .user-role { font-size: 10px; color: var(--muted); }
 
-    .last-update { font-size: 11px; color: var(--muted); }
+    /* Main Content */
+    .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+    .header {
+      height: 64px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 24px;
+      z-index: 10;
+    }
+    .page-title { font-size: 16px; font-weight: 500; }
+    .actions { display: flex; align-items: center; gap: 12px; }
+    .btn {
+      padding: 8px 16px; border-radius: 6px; border: none; font-family: inherit; font-size: 13px;
+      cursor: pointer; display: inline-flex; align-items: center; gap: 8px; transition: all 0.2s;
+    }
+    .btn-accent { background: var(--accent); color: #fff; }
+    .btn-accent:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3); }
+    .btn-ghost { background: transparent; color: var(--text2); border: 1px solid var(--border); }
+    .btn-ghost:hover { background: var(--surface2); color: var(--text); }
 
-    /* ── CONTENT ── */
-    .content { padding: 28px 32px; }
-
-    /* ── PAGE SECTIONS ── */
-    .page-section { display: none; }
-    .page-section.active { display: block; }
-
-    /* ── KPI GRID ── */
-    .kpi-grid {
+    .content { flex: 1; overflow-y: auto; padding: 24px; }
+    .dashboard-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 16px;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px;
       margin-bottom: 24px;
     }
 
-    .kpi-card {
+    /* Cards */
+    .kpi {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 20px 22px;
-      transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
-      animation: fadeIn 0.4s ease both;
-      box-shadow: var(--shadow);
-    }
-
-    .kpi-card:hover {
-      border-color: var(--accent);
-      box-shadow: var(--shadow-lg);
-      transform: translateY(-1px);
-    }
-
-    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(12px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    .kpi-label {
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.8px;
-      color: var(--muted);
-      margin-bottom: 8px;
-    }
-
-    .kpi-value {
-      font-family: 'Aptos', 'Segoe UI', 'Inter', system-ui, sans-serif;
-      font-size: 24px;
-      font-weight: 600;
-      letter-spacing: -0.5px;
-    }
-
-    .kpi-sub {
-      font-size: 12px;
-      color: var(--muted);
-      margin-top: 4px;
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-
-    .badge {
-      display: inline-flex;
-      align-items: center;
-      padding: 2px 7px;
       border-radius: 12px;
-      font-size: 11px;
-      font-weight: 600;
+      padding: 20px;
+      position: relative;
+      overflow: hidden;
     }
+    .kpi-label { font-size: 12px; color: var(--text2); margin-bottom: 8px; }
+    .kpi-val { font-size: 24px; font-weight: 600; margin-bottom: 4px; }
+    .kpi-change { font-size: 11px; display: flex; align-items: center; gap: 4px; }
+    .up { color: var(--green); } .down { color: var(--red); }
 
-    .badge-up { background: rgba(34,197,94,0.12); color: #22c55e; }
-    .badge-down { background: rgba(248,113,113,0.15); color: var(--danger); }
-    .badge-neutral { background: rgba(107,114,128,0.2); color: var(--muted2); }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 20px; overflow: hidden; }
+    .card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+    .card-title { font-size: 14px; font-weight: 600; }
+    .card-body { padding: 20px; }
 
-    /* ── GRID LAYOUT ── */
-    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
-    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 24px; }
-    .grid-13 { display: grid; grid-template-columns: 1fr 2fr; gap: 16px; margin-bottom: 24px; }
-    .grid-31 { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 24px; }
+    /* Tables */
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; padding: 12px 0; border-bottom: 1px solid var(--border); }
+    td { padding: 14px 0; font-size: 13px; border-bottom: 1px solid var(--border); }
+    .price { font-family: 'Inter', monospace; font-weight: 500; }
 
-    .panel {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 20px 22px;
-      box-shadow: var(--shadow);
-      transition: background 0.25s, border-color 0.25s;
-    }
+    /* Sections */
+    .section { display: none; animation: fadeIn 0.3s ease; }
+    .section.active { display: block; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
-    .panel-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 16px;
-    }
+    /* Chart Containers */
+    .chart-box { height: 300px; width: 100%; position: relative; }
 
-    .panel-title {
-      font-family: 'Aptos', 'Segoe UI', 'Inter', system-ui, sans-serif;
-      font-size: 14px;
-      font-weight: 600;
-    }
-
-    .panel-action {
-      font-size: 12px;
-      
-      cursor: pointer;
-      border: none;
-      background: none;
-      font-family: 'Aptos', 'Segoe UI', 'Inter', system-ui, sans-serif; font-weight: 400;
-    }
-
-    /* ── CHART CONTAINERS ── */
-    .chart-wrap { position: relative; height: 220px; }
-    .chart-wrap-lg { position: relative; height: 280px; }
-
-    /* ── TABLE ── */
-    .data-table { width: 100%; border-collapse: collapse; }
-    .data-table th {
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.6px;
-      color: var(--muted);
-      padding: 0 12px 10px;
-      text-align: left;
-      font-weight: 500;
-    }
-    .data-table th:last-child, .data-table td:last-child { text-align: right; }
-
-    .data-table td {
-      padding: 10px 12px;
-      font-size: 13.5px;
-      border-top: 1px solid var(--border);
-    }
-
-    .data-table tr:hover td { background: var(--surface2); }
-
-    .asset-name { display: flex; align-items: center; gap: 8px; }
-
-    .asset-badge {
-      font-size: 10px;
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-weight: 600;
-    }
-
-    .badge-stock { background: rgba(96,165,250,0.15); color: var(--blue); }
-    .badge-crypto { background: rgba(251,191,36,0.15); color: var(--gold); }
-    .badge-savings { background: rgba(90,242,200,0.15); color: var(--accent2); }
-    .badge-esop { background: rgba(59,130,246,0.1);  }
-
-    /* ── PROGRESS BAR ── */
-    .progress-wrap { margin-bottom: 12px; }
-    .progress-header { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted2); margin-bottom: 4px; }
-    .progress-bar { height: 6px; background: var(--surface2); border-radius: 3px; overflow: hidden; }
-    .progress-fill { height: 100%; border-radius: 3px; transition: width 0.8s ease; }
-
-    /* ── FORMS / INPUTS ── */
-    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .form-full { grid-column: 1 / -1; }
-
-    .field-group { margin-bottom: 14px; }
-    .field-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; display: block; }
-
-    .field-input {
-      width: 100%;
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 9px 12px;
-      color: var(--text);
-      font-family: 'Aptos', 'Segoe UI', 'Inter', system-ui, sans-serif; font-weight: 400;
-      font-size: 13px;
-      outline: none;
-      transition: border-color 0.2s;
-    }
-
-    .field-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(139,92,246,0.15); }
-    .field-input option { background: var(--surface2); }
-
-    .btn {
-      padding: 9px 18px;
-      border-radius: 8px;
-      border: none;
-      font-family: 'Aptos', 'Segoe UI', 'Inter', system-ui, sans-serif;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .btn-accent { background: linear-gradient(135deg,#1d4ed8,#3b82f6); color: #060810; }
-    .btn-accent:hover { box-shadow: 0 4px 16px rgba(59,130,246,0.35); transform: translateY(-1px); }
-    .btn-ghost { background: var(--surface2); color: var(--muted2); border: 1px solid var(--border); }
-    .btn-ghost:hover { border-color: var(--border2); color: var(--text); }
-    .btn-danger { background: rgba(248,113,113,0.15); color: var(--danger); border: 1px solid rgba(248,113,113,0.2); }
-
-    /* ── TAGS ── */
-    .tag-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-    .tag {
-      padding: 3px 10px;
-      border-radius: 12px;
-      font-size: 11px;
-      font-weight: 600;
-      border: 1px solid;
-    }
-
-    /* ── SALARY / SAVINGS RATE ── */
-    .rate-circle {
-      width: 100px; height: 100px;
-      border-radius: 50%;
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      border: 3px solid var(--accent);
-      background: rgba(59,130,246,0.05);
-    }
-
-    .rate-circle .rate-val {
-      font-family: 'Aptos', 'Segoe UI', 'Inter', system-ui, sans-serif;
-      font-size: 24px;
-      font-weight: 600;
-      
-    }
-
-    .rate-circle .rate-label { font-size: 10px; color: var(--muted); }
-
-    /* ── PROJECTION ── */
-    .projection-slider { width: 100%; accent- cursor: pointer; }
-
-    /* ── FEES SCANNER ── */
-    .fee-item {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 12px 0;
-      border-bottom: 1px solid var(--border);
-    }
-
-    .fee-item:last-child { border-bottom: none; }
-
-    .fee-score {
-      width: 10px; height: 10px;
-      border-radius: 50%;
-      flex-shrink: 0;
-    }
-
-    /* ── MODAL ── */
+    /* Modal */
     .modal-overlay {
-      position: fixed; inset: 0;
-      background: rgba(0,0,0,0.7);
-      backdrop-filter: blur(6px);
-      z-index: 200;
-      display: none;
-      align-items: center;
-      justify-content: center;
+      position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(4px);
+      z-index: 1000; display: none; align-items: center; justify-content: center;
       padding: 20px;
     }
-
-    .modal-overlay.open { display: flex; }
-
     .modal {
-      background: var(--surface);
-      border: 1px solid var(--border2);
-      border-radius: 8px;
-      padding: 28px;
-      width: 100%;
-      max-width: 480px;
-      animation: fadeUp 0.3s ease both;
+      background: var(--surface); border: 1px solid var(--border2); border-radius: 16px;
+      width: 100%; max-width: 480px; padding: 24px; box-shadow: 0 20px 50px rgba(0,0,0,0.5);
     }
-
-    @keyframes fadeUp {
-      from { opacity: 0; transform: translateY(20px); }
-      to { opacity: 1; transform: translateY(0); }
+    .modal-title { font-size: 18px; font-weight: 600; margin-bottom: 20px; }
+    .field-label { display: block; font-size: 12px; color: var(--text2); margin-bottom: 6px; }
+    .field-input {
+      width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px 14px; color: var(--text); font-family: inherit; margin-bottom: 16px; outline: none;
     }
+    .field-input:focus { border-color: var(--accent); }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
-    .modal-header {
-      display: flex; align-items: center; justify-content: space-between;
-      margin-bottom: 20px;
-    }
-
-    .modal-title { font-family: 'Aptos', 'Segoe UI', 'Inter', system-ui, sans-serif; font-size: 17px; font-weight: 600; }
-
-    .close-btn {
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      color: var(--muted2);
-      width: 28px; height: 28px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 14px;
-      display: flex; align-items: center; justify-content: center;
-    }
-
-    /* ── HAMBURGER (masqué — sidebar remplacée par bottom nav) ── */
-    .hamburger { display: none !important; }
-    .sidebar-overlay { display: none !important; }
-
-    /* ── PWA / MOBILE SAFE AREAS ── */
-    body {
-      padding-top: env(safe-area-inset-top);
-      padding-bottom: env(safe-area-inset-bottom);
-    }
-
-    /* ── BOTTOM NAV — toujours visible sur tous les écrans ── */
-    .mobile-nav {
-      display: flex;
-      position: fixed;
-      bottom: 0; left: 0; right: 0;
-      background: var(--surface);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      border-top: 1px solid var(--border);
-      padding: 4px 0 calc(4px + env(safe-area-inset-bottom));
-      z-index: 200;
-      gap: 0;
-      overflow-x: auto;
-      overflow-y: hidden;
-      scrollbar-width: none;
-      -ms-overflow-style: none;
-      box-shadow: 0 -1px 0 var(--border);
-      transition: background 0.25s, border-color 0.25s;
-    }
-    .mobile-nav::-webkit-scrollbar { display: none; }
-
-    .mobile-nav-item {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 3px;
-      padding: 6px 10px;
-      border-radius: 10px;
-      cursor: pointer;
-      font-size: 9px;
-      font-weight: 500;
-      letter-spacing: 0.3px;
-      color: var(--muted);
-      border: none;
-      background: none;
-      transition: all 0.18s;
-      min-width: 48px;
-      flex: 1;
-      max-width: 80px;
-    }
-
-    .mobile-nav-item:hover { color: var(--text); }
-
-    .mobile-nav-item.active {
-      color: var(--accent2);
-      background: rgba(139,92,246,0.12);
-    }
-
-    .mobile-nav-item .mn-icon { font-size: 20px; line-height: 1; }
-
-    /* Splash screen */
-    .splash {
-      position: fixed; inset: 0;
-      background: var(--bg);
-      display: flex; flex-direction: column;
-      align-items: center; justify-content: center;
-      z-index: 9999;
-      transition: opacity 0.4s ease;
-    }
-    .splash.hidden { opacity: 0; pointer-events: none; }
-    .splash-logo { font-size: 60px; margin-bottom: 16px; }
-    .splash-name { font-family: 'Aptos', 'Segoe UI', 'Inter', system-ui, sans-serif; font-size: 24px; font-weight: 600; color: var(--text); }
-    .splash-name span {  }
-    .splash-sub { color: var(--muted); font-size: 13px; margin-top: 6px; }
-
+    /* Responsive */
     @media (max-width: 900px) {
-      .grid-2, .grid-3, .grid-13, .grid-31 { grid-template-columns: 1fr; }
-      .kpi-grid { grid-template-columns: 1fr 1fr; }
-      .content { padding: 20px 16px; }
-      .topbar { padding: 16px 20px; }
-      .form-grid { grid-template-columns: 1fr; }
+      .sidebar { position: fixed; transform: translateX(-100%); bottom: 0; top: 0; }
+      .sidebar.open { transform: translateX(0); }
+      .main { width: 100%; }
     }
-
-    @media (max-width: 480px) {
-      .kpi-grid { grid-template-columns: 1fr; }
-    }
-
-    /* ── SORT BUTTONS ── */
-    .sort-btn {
-      padding: 5px 10px;
-      border-radius: 6px;
-      border: 1px solid var(--border);
-      background: var(--surface2);
-      color: var(--muted);
-      font-size: 11px;
-      font-family: 'Aptos', 'Segoe UI', 'Inter', system-ui, sans-serif;
-      font-weight: 400;
-      cursor: pointer;
-      transition: all 0.15s;
-      white-space: nowrap;
-    }
-    .sort-btn:hover { border-color: var(--accent2); color: var(--text); }
-    .sort-btn.active {
-      background: rgba(139,92,246,0.15);
-      border-color: var(--accent2);
-      color: var(--accent2);
-      font-weight: 500;
-    }
-
-    /* Perf cell coloring */
-    .perf-pos { color: #22c55e; font-weight: 500; }
-    .perf-neg { color: #ef4444; font-weight: 500; }
-    .perf-zero { color: var(--muted); }
-    .period-btn {
-      padding: 6px 14px;
-      border-radius: 12px;
-      border: 1px solid var(--border);
-      background: var(--surface2);
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 400;
-      font-family: 'Aptos', 'Segoe UI', 'Inter', system-ui, sans-serif;
-      cursor: pointer;
-      transition: all 0.2s;
-      letter-spacing: 0.3px;
-    }
-    .period-btn:hover { border-color: var(--accent2); color: var(--text); }
-    .period-btn.active, .period-btn.active-default {
-      background: rgba(139,92,246,0.15);
-      border-color: var(--accent2);
-      color: var(--accent2);
-      font-weight: 500;
-    }
-
-    /* Tooltip crosshair */
-    #chartTooltip {
-      position: absolute;
-      background: var(--surface2);
-      border: 1px solid var(--border2);
-      border-radius: 8px;
-      padding: 8px 12px;
-      font-size: 12px;
-      pointer-events: none;
-      display: none;
-      z-index: 10;
-      white-space: nowrap;
-    }
-    /* ── LOAN TABS ── */
-    .loan-tab {
-      padding: 7px 16px;
-      border-radius: 6px;
-      border: none;
-      background: transparent;
-      color: var(--muted2);
-      font-size: 13px;
-      font-weight: 400;
-      font-family: 'Aptos', 'Segoe UI', 'Inter', system-ui, sans-serif;
-      cursor: pointer;
-      transition: all 0.15s;
-    }
-    .loan-tab:hover { background: var(--surface3); color: var(--text); }
-    .loan-tab.active { background: var(--surface); color: var(--text); font-weight: 500; box-shadow: 0 1px 4px rgba(0,0,0,0.3); }
-
-    /* ── STAT CELLS ── */
-    .stat-cell { background:var(--surface); padding:16px 18px; }
-    .stat-label { font-size:11px; font-weight:500; color:var(--muted2); margin-bottom:6px; letter-spacing:0.3px; }
-    .stat-value { font-size:18px; font-weight:600; letter-spacing:-0.5px; color:var(--text); }
-    .stat-sub { font-size:11px; color:var(--muted2); margin-top:3px; }
-
-    /* ── CATEGORY CARDS ── */
-    .cat-card { background:var(--surface); display:flex; align-items:center; padding:16px 20px; cursor:pointer; transition:background 0.12s; gap:14px; }
-    .cat-card:hover { background:var(--surface2); }
-    .cat-icon { width:36px; height:36px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:16px; flex-shrink:0; }
-    .cat-info { flex:1; min-width:0; }
-    .cat-name { font-size:14px; font-weight:500; color:var(--text); letter-spacing:-0.1px; }
-    .cat-sub  { font-size:12px; color:var(--muted2); margin-top:2px; }
-    .cat-right { text-align:right; flex-shrink:0; }
-    .cat-val  { font-size:15px; font-weight:600; letter-spacing:-0.4px; color:var(--text); }
-    .cat-perf { font-size:12px; font-weight:500; margin-top:2px; }
-
-    .empty-state {
-      text-align: center;
-      padding: 40px 20px;
-      color: var(--muted);
-    }
-
-    .empty-state .icon { font-size: 36px; margin-bottom: 12px; }
-    .empty-state p { font-size: 13px; }
-
-    /* ── NOTIFICATIONS ── */
-    .toast {
-      position: fixed;
-      bottom: 84px; right: 20px;
-      background: var(--surface);
-      border: 1px solid var(--border2);
-      border-radius: 10px;
-      padding: 12px 18px;
-      font-size: 13px;
-      font-weight: 500;
-      z-index: 1000;
-      animation: slideIn 0.3s cubic-bezier(.22,.68,0,1.2);
-      max-width: 300px;
-      box-shadow: var(--shadow-lg);
-    }
-
-    @keyframes slideIn {
-      from { opacity: 0; transform: translateX(20px); }
-      to { opacity: 1; transform: translateX(0); }
-    }
-
-    .color-accent {  }
-    .color-danger { color: var(--danger); }
-    .color-gold { color: var(--gold); }
-    .color-blue { color: var(--blue); }
-    .color-muted { color: var(--muted); }
-    .fw-bold { font-weight: 600; }
-    .mt-8 { margin-top: 8px; }
-    .mt-16 { margin-top: 16px; }
-    .mb-16 { margin-bottom: 16px; }
-    .flex { display: flex; align-items: center; }
-    .flex-between { display: flex; align-items: center; justify-content: space-between; }
-    .gap-8 { gap: 8px; }
-    .gap-12 { gap: 12px; }
-    .text-sm { font-size: 13px; }
-    .text-xs { font-size: 11px; }
-    .w-full { width: 100%; }
-
-    /* Section title */
-    .section-title {
-      font-family: 'Aptos', 'Segoe UI', 'Inter', system-ui, sans-serif;
-      font-size: 20px;
-      font-weight: 600;
-      margin-bottom: 6px;
-    }
-    .section-sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
-
-    /* Highlight card */
-    .highlight-card {
-      background: linear-gradient(135deg, rgba(59,130,246,0.06), rgba(90,242,200,0.04));
-      border: 1px solid rgba(59,130,246,0.18);
-      border-radius: var(--radius);
-      padding: 20px;
-      margin-bottom: 16px;
-    }
-
-    /* ── THEME TOGGLE ── */
-    #themeToggle:hover { border-color: var(--accent); }
-
-    /* ── TABLES LIGHT MODE ── */
-    .data-table td { transition: background 0.25s; }
-    :root[data-theme="light"] .data-table tr:hover td { background: var(--surface2); }
-    :root[data-theme="light"] .data-table th { color: var(--muted2); }
-
-    /* ── CAT-CARDS LIGHT ── */
-    :root[data-theme="light"] .cat-card { border-bottom: 1px solid var(--border); }
-
-    /* ── MODAL LIGHT ── */
-    :root[data-theme="light"] .modal {
-      background: var(--surface);
-      border-color: var(--border2);
-      box-shadow: var(--shadow-lg);
-    }
-    :root[data-theme="light"] .modal-overlay { background: rgba(0,0,0,0.4); }
-
-    /* ── BADGE light ── */
-    :root[data-theme="light"] .badge-up { background: rgba(22,163,74,0.12); color: #16a34a; }
-    :root[data-theme="light"] .badge-down { background: rgba(220,38,38,0.12); color: #dc2626; }
-    :root[data-theme="light"] .badge-neutral { background: rgba(107,114,128,0.15); }
-
-    /* ── KPI LABEL ── */
-    :root[data-theme="light"] .kpi-label { color: var(--muted2); }
-
-    /* ── PROGRESS BAR light ── */
-    :root[data-theme="light"] .progress-bar { background: var(--surface3); }
-
-    /* ── SECTION TITLES ── */
-    .section-title { font-size: 22px; font-weight: 600; letter-spacing: -0.4px; margin-bottom: 6px; }
-    .section-sub { color: var(--muted2); font-size: 13.5px; margin-bottom: 24px; }
-
-    /* ── CONTENT PADDING ── */
-    .content { padding: 24px 28px; }
-
-    /* ── BOTTOM NAV ACTIVE ── */
-    .mobile-nav-item.active {
-      color: var(--accent);
-      background: rgba(139,92,246,0.10);
-    }
-    :root[data-theme="light"] .mobile-nav-item.active {
-      color: var(--accent2);
-      background: rgba(109,40,217,0.08);
-    }
-
-    /* ── THEME BUTTONS in settings ── */
-    #btnDark.active-theme, #btnLight.active-theme {
-      border-color: var(--accent);
-      background: rgba(139,92,246,0.12);
-      color: var(--accent);
-    }
-
-    /* ── SCROLLBAR ── */
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
-    ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
-
-    /* ── REFRESH BTN ── */
-    .refresh-btn:hover { border-color: var(--accent); color: var(--text); }
-
-    /* ── PANEL HEADER ── */
-    .panel-title { font-size: 14px; font-weight: 600; letter-spacing: -0.1px; }
-    .panel-action { color: var(--accent2); }
-    .panel-action:hover { color: var(--accent); }
-
-    /* ── EMPTY STATE ── */
-    :root[data-theme="light"] .empty-state { color: var(--muted2); }
-
   </style>
 </head>
 <body>
-  <!-- Sidebar overlay for mobile -->
-  <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
 
-  <!-- ── SIDEBAR (masquée, remplacée par bottom nav) ── -->
-  <aside class="sidebar" id="sidebar" style="display:none;">
-    <div class="sidebar-brand">
-      <div class="brand-icon">₩</div>
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <div class="logo-box">
+        <svg viewBox="0 0 24 24"><polyline points="3,17 8,10 13,14 21,6"/><line x1="21" y1="6" x2="21" y2="12"/><line x1="21" y1="6" x2="15" y2="6"/></svg>
+      </div>
       <div class="brand-name">Patrim<b>onia</b></div>
     </div>
 
-    <nav>
-      <div class="nav-section-title">Vue d'ensemble</div>
-      <button class="nav-item active" onclick="navigate('overview')">
-        <span class="icon">🏠</span> Tableau de bord
-      </button>
-      <button class="nav-item" onclick="navigate('portfolio')">
-        <span class="icon">📈</span> Portefeuille
-      </button>
+    <nav class="nav">
+      <div class="nav-group">
+        <div class="nav-label">Général</div>
+        <a class="nav-item active" onclick="showSec('overview')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          Vue d'ensemble
+        </a>
+        <a class="nav-item" onclick="showSec('assets')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+          Patrimoine & Actifs
+        </a>
+        <a class="nav-item" onclick="showSec('budget')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 12V8H6a2 2 0 0 1-2-2c0-1.1.9-2 2-2h12v4"/><path d="M4 6v12c0 1.1.9 2 2 2h14v-4"/><path d="M18 12a2 2 0 0 0-2 2c0 1.1.9 2 2 2h4v-4h-4z"/></svg>
+          Dépenses & Budget
+        </a>
+      </div>
 
-      <div class="nav-section-title">Finances</div>
-      <button class="nav-item" onclick="navigate('savings')">
-        <span class="icon">🏦</span> Épargne bancaire
-      </button>
-      <button class="nav-item" onclick="navigate('salary')">
-        <span class="icon">💼</span> Salaire & budget
-      </button>
-      <button class="nav-item" onclick="navigate('loan')">
-        <span class="icon">🏠</span> Simulateur de prêt
-      </button>
-
-      <div class="nav-section-title">Analyses</div>
-      <button class="nav-item" onclick="navigate('projection')">
-        <span class="icon">🚀</span> Projection DCA
-      </button>
-      <button class="nav-item" onclick="navigate('dividends')">
-        <span class="icon">💰</span> Dividendes
-      </button>
-      <button class="nav-item" onclick="navigate('ai')">
-        <span class="icon">🤖</span> Analyse IA
-      </button>
-      <button class="nav-item" onclick="navigate('analysis')">
-        <span class="icon">🌍</span> Analyse complète
-      </button>
-      <button class="nav-item" onclick="navigate('fees')">
-        <span class="icon">🔍</span> Scanner de frais
-      </button>
-      <button class="nav-item" onclick="navigate('fiscalite')">
-        <span class="icon">🏛️</span> Fiscalité
-      </button>
-      <button class="nav-item" onclick="navigate('pret')">
-        <span class="icon">🏠</span> Simulation prêt
-      </button>
-
-      <div class="nav-section-title">Sources</div>
-      <button class="nav-item" onclick="navigate('sources')">
-        <span class="icon">🔗</span> Connexions
-      </button>
-      <button class="nav-item" onclick="navigate('settings')">
-        <span class="icon">⚙️</span> Paramètres
-      </button>
+      <div class="nav-group">
+        <div class="nav-label">Outils</div>
+        <a class="nav-item" onclick="showSec('market')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+          Marchés (Live)
+        </a>
+        <a class="nav-item" onclick="showSec('credit')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+          Simulateur Crédit
+        </a>
+      </div>
     </nav>
 
     <div class="sidebar-footer">
       <div class="user-pill">
-        <div class="user-avatar" id="userAvatar">D</div>
+        <div class="avatar">U</div>
         <div class="user-info">
-          <div class="user-name" id="userName">Utilisateur</div>
-          <div class="user-sub">Personnel</div>
+          <span class="user-name" id="userEmail">Chargement...</span>
+          <span class="user-role">Membre Pro</span>
         </div>
-        <button class="logout-btn" onclick="logout()" title="Déconnexion">⏏</button>
       </div>
+      <button class="btn btn-ghost" style="width:100%;" onclick="sb.auth.signOut()">Déconnexion</button>
     </div>
   </aside>
 
-  <!-- ── MAIN ── -->
   <main class="main">
-    <header class="topbar">
-      <div class="flex gap-12" style="align-items:center;">
-        <!-- Logo Patrimonia -->
-        <div style="display:flex;align-items:center;gap:8px;margin-right:4px;">
-          <div style="width:32px;height:32px;background:linear-gradient(135deg,var(--accent),#6366f1);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;">₩</div>
-          <span style="font-weight:600;font-size:16px;letter-spacing:-0.3px;">Patrim<b style="color:var(--accent2);">onia</b></span>
-        </div>
-        <div class="topbar-title" id="topbarTitle" style="font-size:15px;color:var(--muted2);font-weight:400;">Tableau de bord</div>
-      </div>
-      <div class="topbar-right">
-        <span class="last-update" id="lastUpdate" style="display:none;">–</span>
-        <!-- Toggle Light/Dark -->
-        <button id="themeToggle" onclick="toggleTheme()" title="Changer le thème"
-          style="background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:5px 12px;cursor:pointer;font-size:16px;transition:all 0.2s;display:flex;align-items:center;gap:6px;color:var(--text);">
-          <span id="themeIcon">☀️</span>
-        </button>
-        <button class="refresh-btn" onclick="refreshData()" style="padding:7px 10px;" title="Actualiser">↻</button>
-        <button class="btn btn-accent" onclick="openModal('addAsset')" style="font-size:12px;padding:7px 16px;">+ Ajouter</button>
-        <!-- User pill -->
-        <div style="display:flex;align-items:center;gap:8px;padding-left:12px;border-left:1px solid var(--border);">
-          <div class="user-avatar" id="userAvatar" style="width:32px;height:32px;font-size:12px;cursor:pointer;" title="Paramètres" onclick="navigate('settings')">D</div>
-          <div style="display:none;" id="userName">Utilisateur</div>
-          <button class="logout-btn" onclick="logout()" title="Déconnexion" style="font-size:18px;color:var(--muted);padding:0 2px;background:none;border:none;cursor:pointer;transition:color 0.2s;" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--muted)'">⏏</button>
-        </div>
+    <header class="header">
+      <div class="page-title" id="pageTitle">Vue d'ensemble</div>
+      <div class="actions">
+        <button class="btn btn-ghost" onclick="toggleTheme()">🌓</button>
+        <button class="btn btn-accent" id="mainActionBtn" onclick="openModal('addAsset')">+ Ajouter</button>
       </div>
     </header>
 
     <div class="content">
-
-      <!-- ══════════════════════════════════════
-           PAGE: OVERVIEW — Structure Finary
-      ══════════════════════════════════════ -->
-      <section class="page-section active" id="page-overview">
-
-        <!-- ── HERO : Patrimoine total + graphique pleine largeur ── -->
-        <div style="padding:0 0 24px;">
-
-          <!-- Titre + montant + variation -->
-          <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px;">
-            <div>
-              <div style="font-size:12px;color:var(--muted2);font-weight:500;letter-spacing:0.3px;margin-bottom:8px;">
-                Patrimoine financier
-              </div>
-              <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;">
-                <div id="kpi-total" style="font-size:40px;font-weight:600;letter-spacing:-1.5px;line-height:1;color:var(--text);">–</div>
-                <div style="display:flex;align-items:center;gap:8px;">
-                  <span id="chartDeltaVal" style="font-size:15px;font-weight:500;">–</span>
-                  <span id="kpi-total-pct" class="badge badge-neutral" style="font-size:12px;">–</span>
-                </div>
-              </div>
-            </div>
-            <!-- Actions rapides -->
-            <div style="display:flex;align-items:center;gap:8px;padding-top:4px;">
-              <button class="refresh-btn" onclick="refreshData()">↻</button>
-              <button class="btn btn-accent" onclick="navigate('sources')" style="font-size:12px;padding:7px 14px;">+ Connecter</button>
-            </div>
+      
+      <section id="overview" class="section active">
+        <div class="dashboard-grid">
+          <div class="kpi">
+            <div class="kpi-label">Patrimoine Net</div>
+            <div class="kpi-val" id="totalWealth">0 €</div>
+            <div class="kpi-change up">▲ 2.4% <span style="color:var(--muted)">ce mois</span></div>
           </div>
-
-          <!-- Graphique historique pleine largeur -->
-          <div style="position:relative;height:220px;margin-bottom:12px;">
-            <canvas id="chartHistorique"></canvas>
+          <div class="kpi">
+            <div class="kpi-label">Cash & Liquidités</div>
+            <div class="kpi-val" id="totalCash">0 €</div>
+            <div class="kpi-change up">▲ 1.2%</div>
           </div>
-
-          <!-- Filtres période style Finary -->
-          <div style="display:flex;gap:4px;">
-            <button class="period-btn" onclick="setHistoPeriod('1J',this)">1J</button>
-            <button class="period-btn" onclick="setHistoPeriod('7J',this)">7J</button>
-            <button class="period-btn" onclick="setHistoPeriod('1M',this)">1M</button>
-            <button class="period-btn" onclick="setHistoPeriod('3M',this)">3M</button>
-            <button class="period-btn active-default" onclick="setHistoPeriod('YTD',this)">YTD</button>
-            <button class="period-btn" onclick="setHistoPeriod('1A',this)">1A</button>
-            <button class="period-btn" onclick="setHistoPeriod('TOUT',this)">Tout</button>
+          <div class="kpi">
+            <div class="kpi-label">Épargne Mensuelle</div>
+            <div class="kpi-val" id="monthlySavings">0 €</div>
+            <div class="kpi-change down">▼ 0.5%</div>
           </div>
         </div>
 
-        <!-- ── ACTIFS PAR CATÉGORIE (cards Finary) ── -->
-        <div style="margin-bottom:24px;">
-          <div style="font-size:12px;color:var(--muted2);font-weight:500;letter-spacing:0.3px;margin-bottom:12px;">Actifs</div>
-          <div id="categoryCards" style="display:flex;flex-direction:column;gap:1px;background:var(--border);border-radius:10px;overflow:hidden;"></div>
-        </div>
-
-        <!-- ── STATS P&L (ligne de KPIs compacte) ── -->
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:1px;background:var(--border);border-radius:10px;overflow:hidden;margin-bottom:24px;">
-          <div class="stat-cell">
-            <div class="stat-label">P&L total</div>
-            <div class="stat-value" id="kpi-pnl">–</div>
-            <div class="stat-sub" id="kpi-pnl-pct">–</div>
-          </div>
-          <div class="stat-cell">
-            <div class="stat-label">Aujourd'hui</div>
-            <div class="stat-value" id="statD1">–</div>
-            <div class="stat-sub">24h</div>
-          </div>
-          <div class="stat-cell">
-            <div class="stat-label">Cette semaine</div>
-            <div class="stat-value" id="statW1">–</div>
-            <div class="stat-sub">7 jours</div>
-          </div>
-          <div class="stat-cell">
-            <div class="stat-label">Ce mois</div>
-            <div class="stat-value" id="statM1">–</div>
-            <div class="stat-sub">30 jours</div>
-          </div>
-          <div class="stat-cell">
-            <div class="stat-label">YTD</div>
-            <div class="stat-value" id="statYtd">–</div>
-            <div class="stat-sub">Depuis janv.</div>
-          </div>
-          <div class="stat-cell">
-            <div class="stat-label">Positions</div>
-            <div class="stat-value" id="statPositions">–</div>
-            <div class="stat-sub">actifs</div>
-          </div>
-        </div>
-
-        <!-- ── LIGNE : Meilleur / Pire + Taux épargne ── -->
-        <div class="grid-2" style="margin-bottom:24px;">
-
-          <!-- Meilleure / Pire perf -->
-          <div class="panel">
-            <div class="panel-header">
-              <div class="panel-title">Performances</div>
-              <button class="panel-action" onclick="navigate('portfolio')">Voir tout →</button>
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-              <div style="padding:12px;background:var(--surface2);border-radius:8px;">
-                <div style="font-size:10px;color:var(--muted2);font-weight:500;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">🏆 Meilleur</div>
-                <div style="font-size:14px;font-weight:600;" id="statBestName">–</div>
-                <div style="font-size:13px;font-weight:500;color:var(--green);margin-top:2px;" id="statBestPct">–</div>
-              </div>
-              <div style="padding:12px;background:var(--surface2);border-radius:8px;">
-                <div style="font-size:10px;color:var(--muted2);font-weight:500;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">📉 Pire</div>
-                <div style="font-size:14px;font-weight:600;" id="statWorstName">–</div>
-                <div style="font-size:13px;font-weight:500;color:var(--red);margin-top:2px;" id="statWorstPct">–</div>
-              </div>
+        <div style="display:grid; grid-template-columns: 2fr 1fr; gap:20px;">
+          <div class="card">
+            <div class="card-header"><span class="card-title">Évolution du Patrimoine</span></div>
+            <div class="card-body">
+              <div class="chart-box"><canvas id="wealthChart"></canvas></div>
             </div>
           </div>
-
-          <!-- Taux d'épargne -->
-          <div class="panel">
-            <div class="panel-header">
-              <div class="panel-title">Budget mensuel</div>
-              <button class="panel-action" onclick="navigate('salary')">Détail →</button>
-            </div>
-            <div style="display:flex;align-items:center;gap:16px;">
-              <div style="flex-shrink:0;text-align:center;">
-                <div style="font-size:28px;font-weight:600;letter-spacing:-1px;" id="rateVal">–%</div>
-                <div style="font-size:11px;color:var(--muted2);margin-top:2px;">épargné</div>
-              </div>
-              <div style="flex:1;min-width:0;">
-                <div class="progress-wrap">
-                  <div class="progress-header"><span>Salaire net</span><span id="salaryDisplay">–</span></div>
-                  <div class="progress-bar"><div class="progress-fill" style="background:var(--muted2);width:100%"></div></div>
-                </div>
-                <div class="progress-wrap">
-                  <div class="progress-header"><span>Épargné</span><span id="savingsDisplay">–</span></div>
-                  <div class="progress-bar"><div class="progress-fill" id="savingsBar" style="background:var(--green);width:0%"></div></div>
-                </div>
-                <div class="progress-wrap">
-                  <div class="progress-header"><span>Dépenses</span><span id="expensesDisplay">–</span></div>
-                  <div class="progress-bar"><div class="progress-fill" id="expensesBar" style="background:var(--red);width:0%"></div></div>
-                </div>
-              </div>
+          <div class="card">
+            <div class="card-header"><span class="card-title">Répartition</span></div>
+            <div class="card-body">
+              <div class="chart-box"><canvas id="allocationChart"></canvas></div>
             </div>
           </div>
         </div>
-
-        <!-- ── DIVIDENDES ── -->
-        <div class="panel" style="margin-bottom:24px;">
-          <div class="panel-header">
-            <div class="panel-title">Dividendes reçus</div>
-            <button class="panel-action" onclick="navigate('portfolio')">Historique →</button>
-          </div>
-          <div id="dividendsOverview"></div>
-        </div>
-
       </section>
 
-      <!-- ══════════════════════════════════════
-           PAGE: PORTFOLIO
-      ══════════════════════════════════════ -->
-      <section class="page-section" id="page-portfolio">
-        <div class="section-title">Portefeuille</div>
-        <div class="section-sub">Tous vos actifs consolidés</div>
-
-        <!-- Graphique par actif -->
-        <div class="panel" style="margin-bottom:24px;">
-          <div class="panel-header">
-            <div class="panel-title">📊 Performance par actif</div>
-            <select class="field-input" id="assetChartSelect" style="width:auto;padding:5px 10px;font-size:12px;" onchange="renderAssetChart()">
-              <option value="__global__">— Vue globale —</option>
-            </select>
+      <section id="assets" class="section">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Mes Actifs</span>
+            <button class="btn btn-accent" style="padding:4px 10px; font-size:11px;" onclick="openModal('addAsset')">+ Nouveau</button>
           </div>
-
-          <!-- Period buttons for asset chart -->
-          <div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;">
-            <button class="period-btn" onclick="setAssetPeriod('1J',this)">1J</button>
-            <button class="period-btn" onclick="setAssetPeriod('7J',this)">7J</button>
-            <button class="period-btn" onclick="setAssetPeriod('1M',this)">1M</button>
-            <button class="period-btn active-default" onclick="setAssetPeriod('YTD',this)">YTD</button>
-            <button class="period-btn" onclick="setAssetPeriod('1A',this)">1A</button>
-            <button class="period-btn" onclick="setAssetPeriod('TOUT',this)">TOUT</button>
-          </div>
-
-          <div style="display:flex;align-items:flex-end;gap:14px;margin-bottom:16px;flex-wrap:wrap;">
-            <div id="assetChartVal" style="font-family:'Aptos','Segoe UI','Inter',system-ui,sans-serif;font-size:32px;font-weight:300;">–</div>
-            <div id="assetChartDelta" style="padding-bottom:4px;font-size:13px;">–</div>
-          </div>
-
-          <div style="position:relative;height:180px;">
-            <canvas id="chartAsset"></canvas>
-          </div>
-
-          <!-- Mini sparklines par actif -->
-          <div id="assetSparklines" style="margin-top:20px;display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;width:100%;"></div>
-        </div>
-
-        <div class="panel mb-16">
-          <div class="panel-header">
-            <div class="panel-title">Tous les actifs</div>
-          </div>
-
-          <!-- Filtres + Tri -->
-          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;align-items:center;">
-
-            <!-- Filtres existants -->
-            <select class="field-input" style="width:auto;padding:6px 10px;font-size:12px;" id="filterSource" onchange="renderPortfolio()">
-              <option value="all">Toutes sources</option>
-              <option value="sheets">Google Sheets</option>
-              <option value="binance">Binance</option>
-              <option value="crypto">Crypto.com</option>
-              <option value="tr">Trade Republic</option>
-              <option value="manual">Manuel</option>
-            </select>
-            <select class="field-input" style="width:auto;padding:6px 10px;font-size:12px;" id="filterType" onchange="renderPortfolio()">
-              <option value="all">Tous types</option>
-              <option value="stock">Actions/ETF</option>
-              <option value="crypto">Crypto</option>
-              <option value="savings">Épargne</option>
-              <option value="esop">ESOP/PER</option>
-            </select>
-
-            <!-- Séparateur -->
-            <div style="width:1px;height:24px;background:var(--border);margin:0 4px;"></div>
-
-            <!-- Tri par performance -->
-            <span style="font-size:11px;color:var(--muted);letter-spacing:0.5px;">TRIER PAR</span>
-            <div style="display:flex;flex-wrap:wrap;gap:6px;">
-              <button class="sort-btn" onclick="setSortFilter('val_desc')" id="sort_val_desc">💰 Valeur ↓</button>
-              <button class="sort-btn" onclick="setSortFilter('perf_day_desc')" id="sort_perf_day_desc">☀️ Jour ↑</button>
-              <button class="sort-btn" onclick="setSortFilter('perf_day_asc')" id="sort_perf_day_asc">☀️ Jour ↓</button>
-              <button class="sort-btn" onclick="setSortFilter('perf_week_desc')" id="sort_perf_week_desc">📅 Hebdo ↑</button>
-              <button class="sort-btn" onclick="setSortFilter('perf_week_asc')" id="sort_perf_week_asc">📅 Hebdo ↓</button>
-              <button class="sort-btn" onclick="setSortFilter('perf_month_desc')" id="sort_perf_month_desc">🗓️ Mois ↑</button>
-              <button class="sort-btn" onclick="setSortFilter('perf_month_asc')" id="sort_perf_month_asc">🗓️ Mois ↓</button>
-              <button class="sort-btn" onclick="setSortFilter('perf_ytd_desc')" id="sort_perf_ytd_desc">📈 YTD ↑</button>
-              <button class="sort-btn" onclick="setSortFilter('perf_ytd_asc')" id="sort_perf_ytd_asc">📈 YTD ↓</button>
-              <button class="sort-btn" onclick="setSortFilter('perf_total_desc')" id="sort_perf_total_desc">🏆 Total ↑</button>
-              <button class="sort-btn" onclick="setSortFilter('perf_total_asc')" id="sort_perf_total_asc">🏆 Total ↓</button>
-            </div>
-          </div>
-
-          <!-- Podium top/pire performers -->
-          <div id="perfPodium" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px;margin-bottom:16px;"></div>
-
-          <div style="overflow-x:auto;max-width:100%;width:100%">
-            <table class="data-table" id="portfolioTable">
-              <thead><tr>
-                <th>Actif</th><th>Source</th><th>Valeur</th><th>P&L (€)</th><th>P&L (%)</th>
-                <th>Jour</th><th>Hebdo</th><th>Mois</th><th>YTD</th><th>Total</th><th>Poids</th>
-              </tr></thead>
-              <tbody id="portfolioTbody"></tbody>
+          <div class="card-body" style="padding:0 20px;">
+            <table id="assetTable">
+              <thead><tr><th>Nom</th><th>Catégorie</th><th>Valeur</th><th>Performance</th></tr></thead>
+              <tbody id="assetList"></tbody>
             </table>
           </div>
         </div>
       </section>
 
-      <!-- ══════════════════════════════════════
-           PAGE: SAVINGS
-      ══════════════════════════════════════ -->
-      <section class="page-section" id="page-savings">
-        <div class="section-title">Épargne bancaire</div>
-        <div class="section-sub">Livrets, comptes courants, épargne réglementée</div>
-
-        <div class="kpi-grid">
-          <div class="kpi-card">
-            <div class="kpi-label">Total épargne</div>
-            <div class="kpi-value" style="color:var(--accent2);" id="savingsTotal">–</div>
+      <section id="budget" class="section">
+        <div class="dashboard-grid">
+          <div class="kpi">
+            <div class="kpi-label">Revenus fixes</div>
+            <div class="kpi-val" style="color:var(--green)" id="revVal">0 €</div>
           </div>
-          <div class="kpi-card">
-            <div class="kpi-label">Intérêts estimés / an</div>
-            <div class="kpi-value color-accent" id="savingsInterests">–</div>
+          <div class="kpi">
+            <div class="kpi-label">Dépenses totales</div>
+            <div class="kpi-val" style="color:var(--red)" id="expVal">0 €</div>
           </div>
-          <div class="kpi-card">
-            <div class="kpi-label">Taux moyen pondéré</div>
-            <div class="kpi-value" id="savingsAvgRate">–</div>
+          <div class="kpi">
+            <div class="kpi-label">Capacité d'épargne</div>
+            <div class="kpi-val" style="color:var(--accent)" id="capaVal">0 €</div>
           </div>
         </div>
-
-        <div class="grid-2">
-          <div class="panel">
-            <div class="panel-header">
-              <div class="panel-title">Mes livrets</div>
-              <button class="panel-action" onclick="openModal('addSavings')">+ Ajouter</button>
-            </div>
-            <div id="savingsList"></div>
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Dépenses Mensuelles</span>
+            <button class="btn btn-accent" style="padding:4px 10px; font-size:11px;" onclick="openModal('addExpense')">+ Dépense</button>
           </div>
-          <div class="panel">
-            <div class="panel-header"><div class="panel-title">Répartition</div></div>
-            <div class="chart-wrap"><canvas id="chartSavings"></canvas></div>
+          <div class="card-body">
+            <table id="expenseTable">
+              <thead><tr><th>Désignation</th><th>Catégorie</th><th>Montant</th><th>Action</th></tr></thead>
+              <tbody id="expenseList"></tbody>
+            </table>
           </div>
         </div>
       </section>
 
-      <!-- ══════════════════════════════════════
-           PAGE: SALARY & BUDGET
-      ══════════════════════════════════════ -->
-      <section class="page-section" id="page-salary">
-        <div class="section-title">Salaire & Budget</div>
-        <div class="section-sub">Suivi de votre taux d'épargne et de vos dépenses</div>
-
-        <div class="grid-2">
-          <div class="panel">
-            <div class="panel-header">
-              <div class="panel-title">Revenus mensuels</div>
-              <button class="panel-action" onclick="openModal('editSalary')">Modifier</button>
-            </div>
-            <div class="field-group">
-              <div class="progress-wrap">
-                <div class="progress-header"><span>Salaire brut</span><span id="grossDisplay">–</span></div>
-                <div class="progress-bar"><div class="progress-fill" style="background:var(--blue);width:100%"></div></div>
-              </div>
-              <div class="progress-wrap">
-                <div class="progress-header"><span>Salaire net</span><span id="netDisplay">–</span></div>
-                <div class="progress-bar"><div class="progress-fill" id="netBar" style="background:var(--accent2);width:80%"></div></div>
-              </div>
-            </div>
-            <div style="margin-top:16px;">
-              <div class="flex-between text-sm mb-16">
-                <span class="color-muted">Prime intéressement (annuel)</span>
-                <span id="interDisplay">–</span>
-              </div>
-              <div class="flex-between text-sm">
-                <span class="color-muted">Prime participation (annuel)</span>
-                <span id="partDisplay">–</span>
-              </div>
-              <div id="aidesDisplay"></div>
-            </div>
-          </div>
-          <div class="panel">
-            <div class="panel-header"><div class="panel-title">Taux d'épargne mensuel</div></div>
-            <div class="flex" style="justify-content:center; padding:16px 0;">
-              <div class="rate-circle" style="width:130px;height:130px;">
-                <div class="rate-val" style="font-size:30px;" id="rateValBig">–%</div>
-                <div class="rate-label">taux épargne</div>
-              </div>
-            </div>
-            <div class="progress-wrap">
-              <div class="progress-header"><span>Épargné</span><span id="savedMonthly">–</span></div>
-              <div class="progress-bar"><div class="progress-fill" id="savedBar" style="background:var(--accent);width:0%"></div></div>
-            </div>
-            <div class="progress-wrap">
-              <div class="progress-header"><span>Dépenses fixes</span><span id="fixedExp">–</span></div>
-              <div class="progress-bar"><div class="progress-fill" id="fixedBar" style="background:var(--danger);width:0%"></div></div>
-            </div>
-            <div class="progress-wrap">
-              <div class="progress-header"><span>Disponible</span><span id="available">–</span></div>
-              <div class="progress-bar"><div class="progress-fill" id="availBar" style="background:var(--gold);width:0%"></div></div>
-            </div>
-          </div>
-        </div>
-
-        <div class="panel">
-          <div class="panel-header">
-            <div class="panel-title">Dépenses fixes mensuelles</div>
-            <button class="panel-action" onclick="openModal('addExpense')">+ Ajouter</button>
-          </div>
-          <div id="expensesList"></div>
-        </div>
+      <section id="market" class="section">
+        <div class="dashboard-grid" id="marketGrid"></div>
       </section>
 
-      <!-- ══════════════════════════════════════
-           PAGE: PROJECTION DCA
-      ══════════════════════════════════════ -->
-      <section class="page-section" id="page-projection">
-        <div class="section-title">Projection DCA</div>
-        <div class="section-sub">Simulez l'évolution de votre patrimoine</div>
-
-        <div class="highlight-card">
-          <div class="flex-between" style="flex-wrap:wrap; gap:16px;">
-            <div>
-              <div class="kpi-label">Valeur finale projetée</div>
-              <div class="kpi-value color-accent" id="projectedValue">–</div>
-              <div class="text-xs color-muted mt-8" id="projectionMeta">–</div>
-            </div>
-            <div style="text-align:right;">
-              <div class="kpi-label">Gains estimés</div>
-              <div class="kpi-value" id="projectedGains">–</div>
-            </div>
-          </div>
-        </div>
-
-        <div class="grid-2">
-          <div class="panel">
-            <div class="panel-header"><div class="panel-title">Paramètres de simulation</div></div>
-
-            <div class="field-group">
-              <label class="field-label">Capital de départ (€)</label>
-              <input class="field-input" type="number" id="projStartCapital" value="0" oninput="updateProjection()">
-            </div>
-            <div class="field-group">
-              <label class="field-label">DCA mensuel (€)</label>
-              <input class="field-input" type="number" id="projMonthly" value="500" oninput="updateProjection()">
-            </div>
-            <div class="field-group">
-              <label class="field-label">Rendement annuel moyen (%)</label>
-              <input class="field-input" type="range" id="projRate" min="1" max="20" value="8" class="projection-slider" oninput="document.getElementById('projRateLabel').textContent=this.value+'%'; updateProjection()">
-              <div class="flex-between text-xs color-muted mt-8"><span>1%</span><span id="projRateLabel">8%</span><span>20%</span></div>
-            </div>
-            <div class="field-group">
-              <label class="field-label">Durée (années)</label>
-              <input class="field-input" type="range" id="projYears" min="1" max="40" value="20" class="projection-slider" oninput="document.getElementById('projYearsLabel').textContent=this.value+' ans'; updateProjection()">
-              <div class="flex-between text-xs color-muted mt-8"><span>1 an</span><span id="projYearsLabel">20 ans</span><span>40 ans</span></div>
-            </div>
-          </div>
-          <div class="panel">
-            <div class="panel-header"><div class="panel-title">Courbe de croissance</div></div>
-            <div class="chart-wrap-lg"><canvas id="chartProjection"></canvas></div>
-          </div>
-        </div>
-
-        <!-- Milestones -->
-        <div class="panel">
-          <div class="panel-header"><div class="panel-title">Jalons</div></div>
-          <div id="milestones" class="flex" style="flex-wrap:wrap; gap:12px;"></div>
-        </div>
-      </section>
-
-      <!-- ══════════════════════════════════════
-           PAGE: DIVIDENDES
-      ══════════════════════════════════════ -->
-      <section class="page-section" id="page-dividends">
-        <div class="section-title">💰 Analyse des dividendes</div>
-        <div class="section-sub">Rendement, historique et projections de revenus passifs</div>
-
-        <!-- KPIs dividendes -->
-        <div class="kpi-grid" style="margin-bottom:20px;">
-          <div class="kpi-card">
-            <div class="kpi-label">Reçus cette année</div>
-            <div class="kpi-value" id="div-total-received" style="color:var(--green);">–</div>
-            <div class="kpi-sub" id="div-count">– versements</div>
-          </div>
-          <div class="kpi-card">
-            <div class="kpi-label">Rendement moyen portefeuille</div>
-            <div class="kpi-value" id="div-yield">–</div>
-            <div class="kpi-sub">sur valeur totale</div>
-          </div>
-          <div class="kpi-card">
-            <div class="kpi-label">Dividendes / mois (moy.)</div>
-            <div class="kpi-value" id="div-monthly">–</div>
-            <div class="kpi-sub">revenu passif mensuel</div>
-          </div>
-          <div class="kpi-card">
-            <div class="kpi-label">Prochain dividende estimé</div>
-            <div class="kpi-value" id="div-next">–</div>
-            <div class="kpi-sub" id="div-next-company">–</div>
-          </div>
-        </div>
-
-        <div class="grid-2" style="margin-bottom:20px;">
-          <!-- Historique par société -->
-          <div class="panel">
-            <div class="panel-header">
-              <div class="panel-title">Par société</div>
-              <span class="panel-action" id="div-total-label">Total : –</span>
-            </div>
-            <div id="div-by-company"></div>
-          </div>
-
-          <!-- Graphique évolution -->
-          <div class="panel">
-            <div class="panel-header"><div class="panel-title">Évolution mensuelle</div></div>
-            <div class="chart-wrap"><canvas id="chartDividends"></canvas></div>
-          </div>
-        </div>
-
-        <!-- Rendement par action -->
-        <div class="panel" style="margin-bottom:20px;">
-          <div class="panel-header">
-            <div class="panel-title">Rendement par position</div>
-            <span class="text-xs color-muted2">Dividende par action / cours actuel</span>
-          </div>
-          <div id="div-yield-table"></div>
-        </div>
-
-        <!-- Projection revenus passifs -->
-        <div class="panel">
-          <div class="panel-header"><div class="panel-title">🔮 Projection revenus passifs</div></div>
-          <div class="grid-2">
-            <div>
-              <div style="margin-bottom:14px;">
-                <label class="field-label">Taux de croissance annuel des dividendes (%)</label>
-                <input class="field-input" type="range" id="divGrowthSlider" min="0" max="20" value="5" step="1"
-                  oninput="document.getElementById('divGrowthVal').textContent=this.value+'%'; renderDivProjection()">
-                <div class="flex-between text-xs color-muted mt-8">
-                  <span>0%</span><span id="divGrowthVal">5%</span><span>20%</span>
-                </div>
-              </div>
-              <div id="divProjectionStats"></div>
-            </div>
-            <div class="chart-wrap"><canvas id="chartDivProjection"></canvas></div>
-          </div>
-        </div>
-      </section>
-
-      <!-- ══════════════════════════════════════
-           PAGE: ANALYSE IA
-      ══════════════════════════════════════ -->
-      <section class="page-section" id="page-ai">
-        <div class="section-title">🤖 Analyse IA du portefeuille</div>
-        <div class="section-sub">Analyse automatique de votre patrimoine par intelligence artificielle</div>
-
-        <!-- Bouton analyser -->
-        <div class="panel" style="margin-bottom:20px;">
-          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
-            <div>
-              <div style="font-size:14px;font-weight:600;margin-bottom:4px;">Analyse complète de votre portefeuille</div>
-              <div style="font-size:13px;color:var(--muted2);">L'IA analyse vos actifs, performances, risques et vous donne des recommandations personnalisées.</div>
-            </div>
-            <button class="btn btn-accent" onclick="runAIAnalysis()" id="aiAnalyzeBtn" style="flex-shrink:0;">
-              ✨ Analyser mon portefeuille
-            </button>
-          </div>
-          <div id="aiLoading" style="display:none;margin-top:16px;text-align:center;color:var(--muted2);font-size:13px;">
-            <div style="font-size:24px;margin-bottom:8px;animation:spin 1.5s linear infinite;display:inline-block;">⟳</div>
-            <div>L'IA analyse votre portefeuille…</div>
-          </div>
-        </div>
-
-        <!-- Résultats IA -->
-        <div id="aiResults" style="display:none;">
-
-          <!-- Score global -->
-          <div class="panel" style="margin-bottom:20px;">
-            <div class="panel-header"><div class="panel-title">Score global du portefeuille</div></div>
-            <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;">
-              <div id="aiScoreCircle" style="width:90px;height:90px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;flex-shrink:0;">
-                <div id="aiScoreVal" style="font-size:28px;font-weight:600;"></div>
-                <div style="font-size:10px;color:var(--muted2);margin-top:2px;">/10</div>
-              </div>
-              <div style="flex:1;min-width:200px;">
-                <div id="aiScoreSummary" style="font-size:14px;line-height:1.7;"></div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 4 sections d'analyse -->
-          <div class="grid-2" style="margin-bottom:20px;">
-            <div class="panel" id="aiStrengths">
-              <div class="panel-header"><div class="panel-title">✅ Points forts</div></div>
-              <div id="aiStrengthsList"></div>
-            </div>
-            <div class="panel" id="aiWeaknesses">
-              <div class="panel-header"><div class="panel-title">⚠️ Points à améliorer</div></div>
-              <div id="aiWeaknessesList"></div>
-            </div>
-          </div>
-
-          <!-- Recommandations -->
-          <div class="panel" style="margin-bottom:20px;">
-            <div class="panel-header"><div class="panel-title">🎯 Recommandations personnalisées</div></div>
-            <div id="aiRecommendations"></div>
-          </div>
-
-          <!-- Analyse risques -->
-          <div class="panel" style="margin-bottom:20px;">
-            <div class="panel-header"><div class="panel-title">⚡ Analyse des risques</div></div>
-            <div id="aiRisks"></div>
-          </div>
-
-          <!-- Opportunités -->
-          <div class="panel">
-            <div class="panel-header"><div class="panel-title">🚀 Opportunités détectées</div></div>
-            <div id="aiOpportunities"></div>
-          </div>
-        </div>
-
-        <!-- Message si pas de données -->
-        <div id="aiEmpty" style="display:none;">
-          <div class="empty-state">
-            <div class="icon">📊</div>
-            <p>Importez d'abord vos actifs via Google Sheets ou les connexions pour que l'IA puisse les analyser.</p>
-          </div>
-        </div>
-      </section>
-
-      <!-- ══════════════════════════════════════
-           PAGE: ANALYSIS
-      ══════════════════════════════════════ -->
-      <section class="page-section" id="page-analysis">
-        <div class="section-title">Analyse complète</div>
-        <div class="section-sub">Géographie, sectorielle, exposition et surexpositions</div>
-
-        <div class="grid-3">
-          <div class="panel">
-            <div class="panel-header"><div class="panel-title">🌍 Géographie</div></div>
-            <div class="chart-wrap"><canvas id="chartGeo"></canvas></div>
-          </div>
-          <div class="panel">
-            <div class="panel-header"><div class="panel-title">🏭 Secteurs</div></div>
-            <div class="chart-wrap"><canvas id="chartSector"></canvas></div>
-          </div>
-          <div class="panel">
-            <div class="panel-header"><div class="panel-title">💱 Devises</div></div>
-            <div class="chart-wrap"><canvas id="chartCurrency"></canvas></div>
-          </div>
-        </div>
-
-        <div class="panel">
-          <div class="panel-header"><div class="panel-title">⚠️ Alertes de concentration</div></div>
-          <div id="concentrationAlerts"></div>
-        </div>
-      </section>
-
-      <!-- ══════════════════════════════════════
-           PAGE: FEES
-      ══════════════════════════════════════ -->
-      <section class="page-section" id="page-fees">
-        <div class="section-title">Scanner de frais</div>
-        <div class="section-sub">Identifiez et optimisez vos coûts cachés</div>
-
-        <div class="kpi-grid">
-          <div class="kpi-card">
-            <div class="kpi-label">Frais totaux / an</div>
-            <div class="kpi-value color-danger" id="feeTotal">–</div>
-          </div>
-          <div class="kpi-card">
-            <div class="kpi-label">Impact sur 20 ans</div>
-            <div class="kpi-value color-gold" id="feeImpact">–</div>
-            <div class="kpi-sub">Coût d'opportunité</div>
-          </div>
-          <div class="kpi-card">
-            <div class="kpi-label">Score d'optimisation</div>
-            <div class="kpi-value color-accent" id="feeScore">–/10</div>
-          </div>
-        </div>
-
-        <div class="panel">
-          <div class="panel-header"><div class="panel-title">Analyse par plateforme</div></div>
-          <div id="feesBreakdown"></div>
-        </div>
-      </section>
-
-      <!-- ══════════════════════════════════════
-           PAGE: SOURCES
-      ══════════════════════════════════════ -->
-      <section class="page-section" id="page-sources">
-        <div class="section-title">Connexions</div>
-        <div class="section-sub">Gérez vos sources de données</div>
-
-        <div class="grid-2">
-          <!-- Google Sheets -->
-          <div class="panel">
-            <div class="panel-header">
-              <div class="panel-title">📊 Google Sheets</div>
-              <span id="sheetsStatus" class="badge badge-neutral">Non connecté</span>
-            </div>
-
-            <!-- Étape 1 : Clé API -->
-            <div style="background:rgba(96,165,250,0.06);border:1px solid rgba(96,165,250,0.15);border-radius:10px;padding:12px;margin-bottom:14px;">
-              <div style="font-size:11px;color:var(--blue);font-weight:700;margin-bottom:6px;">🔑 Étape 1 — Créer une clé API Google</div>
-              <div class="text-xs color-muted" style="line-height:1.6;">
-                1. Va sur <a href="https://console.cloud.google.com" target="_blank" style="color:var(--accent2)">console.cloud.google.com</a><br>
-                2. Crée un projet → <b>APIs & Services → Credentials</b><br>
-                3. <b>Create credentials → API Key</b><br>
-                4. Active <b>Google Sheets API</b> dans le projet<br>
-                5. Colle la clé ci-dessous (commence par <code style="color:var(--accent)">AIza...</code>)
-              </div>
-            </div>
-
-            <div class="field-group">
-              <label class="field-label">Clé API Google (AIza...)</label>
-              <input class="field-input" id="sheetsApiKey" type="password" placeholder="AIzaSy..." />
-            </div>
-
-            <div class="field-group">
-              <label class="field-label">URL de votre Google Sheet</label>
-              <input class="field-input" id="sheetsUrl" placeholder="https://docs.google.com/spreadsheets/d/..." />
-            </div>
-
-            <!-- Structure détectée -->
-            <div id="dashboardDetected" style="display:none;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.1);border-radius:10px;padding:10px;margin-bottom:12px;">
-              <div style="font-size:11px;color:var(--accent);font-weight:700;margin-bottom:4px;">✓ Structure DASHBOARD détectée</div>
-              <div class="text-xs color-muted">Import automatique : <span class="color-blue">CTO</span> · <span class="color-gold">Crypto</span> · <span class="color-accent">AIRBUS</span></div>
-            </div>
-
-            <!-- Mapping générique -->
-            <div class="field-group" id="genericMappingSection" style="display:none;">
-              <label class="field-label">Onglet principal (ex: Feuil1)</label>
-              <input class="field-input" id="sheetsRange" placeholder="Feuil1" />
-              <div class="form-grid" style="margin-top:8px;">
-                <div><label class="field-label">Colonne Nom</label><input class="field-input" id="colName" placeholder="A" /></div>
-                <div><label class="field-label">Colonne Quantité</label><input class="field-input" id="colQty" placeholder="B" /></div>
-                <div><label class="field-label">Colonne Prix Achat</label><input class="field-input" id="colBuy" placeholder="C" /></div>
-                <div><label class="field-label">Colonne Prix Actuel</label><input class="field-input" id="colVal" placeholder="D" /></div>
-              </div>
-            </div>
-
-            <div class="text-xs color-muted" style="margin-bottom:12px;">🔒 Votre clé API est stockée uniquement dans votre navigateur, jamais envoyée à un serveur.</div>
-            <button class="btn btn-accent w-full" id="importSheetsBtn" onclick="connectSheets()">⬇ Importer mon Google Sheet</button>
-            <div id="deleteContainer_sheets"></div>
-          </div>
-
-          <!-- Binance -->
-          <div class="panel">
-            <div class="panel-header">
-              <div class="panel-title">🟡 Binance</div>
-              <span id="binanceStatus" class="badge badge-neutral">Non connecté</span>
-            </div>
-            <div style="background:rgba(251,191,36,0.06);border:1px solid rgba(251,191,36,0.15);border-radius:10px;padding:10px;margin-bottom:14px;">
-              <div style="font-size:11px;color:var(--gold);font-weight:700;margin-bottom:4px;">⚡ Priorité sur Google Sheets pour les cryptos</div>
-              <div class="text-xs color-muted">Prix récupérés en temps réel via CoinGecko.</div>
-            </div>
-            <div class="field-group">
-              <label class="field-label">Clé API Binance (lecture seule)</label>
-              <input class="field-input" type="password" id="binanceApiKey" placeholder="Votre clé API Binance..." />
-            </div>
-            <div class="field-group">
-              <label class="field-label">Secret API (optionnel)</label>
-              <input class="field-input" type="password" id="binanceApiSecret" placeholder="Votre secret API..." />
-            </div>
-            <div class="field-group">
-              <label class="field-label">Vos soldes (format: BTC:0.01, ETH:1.2, BNB:5)</label>
-              <input class="field-input" id="binanceManual" placeholder="BTC:0.01394, ETH:1.0368, CRO:2900" />
-            </div>
-            <div class="text-xs color-muted" style="margin-bottom:12px;">
-              💡 Créez une clé <b>lecture seule</b> sur Binance → Paramètres → Gestion des API.<br>
-              Les clés sont stockées uniquement dans votre navigateur.
-            </div>
-            <button class="btn btn-accent w-full" onclick="connectBinance()">⬇ Importer Binance</button>
-            <div id="deleteContainer_binance"></div>
-          </div>
-
-          <!-- Crypto.com -->
-          <div class="panel">
-            <div class="panel-header">
-              <div class="panel-title">🔵 Crypto.com</div>
-              <span id="cryptoStatus" class="badge badge-neutral">Non connecté</span>
-            </div>
-            <div class="field-group">
-              <label class="field-label">Import CSV / JSON manuel</label>
-              <input class="field-input" type="file" id="cryptoFile" accept=".csv,.json" />
-            </div>
-            <div class="field-group">
-              <label class="field-label">Ou saisie manuelle du solde</label>
-              <input class="field-input" id="cryptoManual" placeholder="BTC:0.5, ETH:2.3, CRO:1000" />
-            </div>
-            <button class="btn btn-accent w-full" onclick="connectCrypto()">Importer Crypto.com</button>
-            <div id="deleteContainer_crypto"></div>
-          </div>
-
-          <!-- Trade Republic -->
-          <div class="panel">
-            <div class="panel-header">
-              <div class="panel-title">🟢 Trade Republic</div>
-              <span id="trStatus" class="badge badge-neutral">Non connecté</span>
-            </div>
-            <div style="background:rgba(90,242,200,0.06);border:1px solid rgba(90,242,200,0.15);border-radius:10px;padding:10px;margin-bottom:14px;">
-              <div style="font-size:11px;color:var(--accent2);font-weight:700;margin-bottom:4px;">⚡ Priorité sur Google Sheets pour les actions/ETF</div>
-              <div class="text-xs color-muted">Import PDF ou CSV. Les cryptos et ESOP/Airbus ne sont pas affectés.</div>
-            </div>
-            <div class="field-group">
-              <label class="field-label">Relevé PDF ou CSV Trade Republic</label>
-              <input class="field-input" type="file" id="trFile" accept=".pdf,.csv" />
-            </div>
-            <div class="text-xs color-muted" style="margin-bottom:12px;">
-              💡 Dans l'app TR : <b>Profil → Documents → Relevé de portefeuille</b><br>
-              Accepte les PDF en français, anglais et allemand.
-            </div>
-            <button class="btn btn-accent w-full" onclick="connectTR()">⬇ Importer Trade Republic</button>
-            <div id="deleteContainer_tr"></div>
-          </div>
-        </div>
-
-        <!-- Manual assets -->
-        <div class="panel mt-16">
-          <div class="panel-header">
-            <div class="panel-title">✏️ Actifs manuels</div>
-            <button class="panel-action" onclick="openModal('addAsset')">+ Ajouter</button>
-          </div>
-          <div id="manualAssetsList"></div>
-        </div>
-      </section>
-
-      <!-- ══════════════════════════════════════
-           PAGE: SIMULATEUR DE PRÊT
-      ══════════════════════════════════════ -->
-      <section class="page-section" id="page-loan">
-        <div class="section-title">🏠 Simulateur de prêt bancaire</div>
-        <div class="section-sub">Calculez vos mensualités, capacité d'emprunt et coût total du crédit</div>
-
-        <!-- Onglets -->
-        <div style="display:flex;gap:4px;margin-bottom:20px;background:var(--surface2);border-radius:8px;padding:4px;width:fit-content;">
-          <button class="loan-tab active" id="tab-mensualite" onclick="switchLoanTab('mensualite')">Mensualités</button>
-          <button class="loan-tab" id="tab-capacite" onclick="switchLoanTab('capacite')">Capacité d'emprunt</button>
-          <button class="loan-tab" id="tab-comparatif" onclick="switchLoanTab('comparatif')">Comparatif banques</button>
-        </div>
-
-        <!-- ══ ONGLET 1 : MENSUALITÉS ══ -->
-        <div id="loan-mensualite">
-          <div class="grid-2" style="margin-bottom:20px;">
-            <!-- Formulaire -->
-            <div class="panel">
-              <div class="panel-header"><div class="panel-title">Paramètres du prêt</div></div>
-
-              <div class="field-group">
-                <label class="field-label">Type de projet</label>
-                <select class="field-input" id="loanType" onchange="calcLoan()">
-                  <option value="immo">Immobilier (résidence principale)</option>
-                  <option value="invest">Immobilier (investissement locatif)</option>
-                  <option value="auto">Crédit auto</option>
-                  <option value="conso">Crédit consommation</option>
-                  <option value="travaux">Travaux / rénovation</option>
-                </select>
-              </div>
-
-              <div class="field-group">
-                <label class="field-label">Prix du bien / montant total (€)</label>
-                <input class="field-input" type="number" id="loanPrice" placeholder="300000" oninput="calcLoan()">
-              </div>
-
-              <div class="field-group">
-                <label class="field-label">Apport personnel (€)</label>
-                <input class="field-input" type="number" id="loanApport" placeholder="30000" oninput="calcLoan()">
-                <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted2);margin-top:4px;">
-                  <span id="loanApportPct">0% du prix</span>
-                  <span id="loanMontantEmprunte" style="color:var(--accent2);">Emprunté : –</span>
-                </div>
-              </div>
-
-              <div class="field-group">
-                <label class="field-label">Durée du prêt</label>
-                <input type="range" id="loanDuree" min="5" max="30" value="20" step="1"
-                  oninput="document.getElementById('loanDureeLabel').textContent=this.value+' ans'; calcLoan()"
-                  style="width:100%;accent-color:var(--accent);margin-bottom:4px;">
-                <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted2);">
-                  <span>5 ans</span><span id="loanDureeLabel" style="color:var(--text);font-weight:600;">20 ans</span><span>30 ans</span>
-                </div>
-              </div>
-
-              <div class="field-group">
-                <label class="field-label">Taux d'intérêt annuel (%)</label>
-                <input type="range" id="loanRate" min="0.5" max="8" value="3.5" step="0.05"
-                  oninput="document.getElementById('loanRateLabel').textContent=parseFloat(this.value).toFixed(2)+'%'; calcLoan()"
-                  style="width:100%;accent-color:var(--accent);margin-bottom:4px;">
-                <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted2);">
-                  <span>0.5%</span><span id="loanRateLabel" style="color:var(--text);font-weight:600;">3.50%</span><span>8%</span>
-                </div>
-              </div>
-
-              <div class="field-group">
-                <label class="field-label">Assurance emprunteur (%/an)</label>
-                <input type="range" id="loanInsurance" min="0" max="1" value="0.25" step="0.01"
-                  oninput="document.getElementById('loanInsuranceLabel').textContent=parseFloat(this.value).toFixed(2)+'%'; calcLoan()"
-                  style="width:100%;accent-color:var(--accent);margin-bottom:4px;">
-                <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted2);">
-                  <span>0%</span><span id="loanInsuranceLabel" style="color:var(--text);font-weight:600;">0.25%</span><span>1%</span>
-                </div>
-              </div>
-
-              <div class="field-group">
-                <label class="field-label">Frais de notaire (%) <span style="color:var(--muted2);font-weight:400;">ancien: 7-8% / neuf: 2-3%</span></label>
-                <input class="field-input" type="number" id="loanNotaire" placeholder="7.5" value="7.5" step="0.1" oninput="calcLoan()">
-              </div>
-            </div>
-
-            <!-- Résultats -->
-            <div>
-              <!-- KPI principale : mensualité -->
-              <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:24px;margin-bottom:12px;text-align:center;">
-                <div style="font-size:12px;color:var(--muted2);font-weight:500;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Mensualité totale</div>
-                <div id="loanMonthly" style="font-size:48px;font-weight:600;letter-spacing:-2px;color:var(--accent2);">–</div>
-                <div style="font-size:13px;color:var(--muted2);margin-top:6px;">
-                  dont <span id="loanMonthlyInsurance" style="color:var(--text);">–</span> d'assurance
-                </div>
-              </div>
-
-              <!-- KPIs secondaires -->
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
-                <div class="kpi-card" style="text-align:center;padding:14px;">
-                  <div class="kpi-label">Capital emprunté</div>
-                  <div class="kpi-value" id="loanCapital" style="font-size:18px;">–</div>
-                </div>
-                <div class="kpi-card" style="text-align:center;padding:14px;">
-                  <div class="kpi-label">Coût total crédit</div>
-                  <div class="kpi-value" id="loanTotalCost" style="font-size:18px;color:var(--red);">–</div>
-                </div>
-                <div class="kpi-card" style="text-align:center;padding:14px;">
-                  <div class="kpi-label">Total intérêts</div>
-                  <div class="kpi-value" id="loanInterets" style="font-size:18px;color:var(--red);">–</div>
-                </div>
-                <div class="kpi-card" style="text-align:center;padding:14px;">
-                  <div class="kpi-label">Frais notaire</div>
-                  <div class="kpi-value" id="loanFraisNotaire" style="font-size:18px;">–</div>
-                </div>
-                <div class="kpi-card" style="text-align:center;padding:14px;">
-                  <div class="kpi-label">Coût total projet</div>
-                  <div class="kpi-value" id="loanTotalProjet" style="font-size:18px;font-weight:700;">–</div>
-                </div>
-                <div class="kpi-card" style="text-align:center;padding:14px;">
-                  <div class="kpi-label">TAEG estimé</div>
-                  <div class="kpi-value" id="loanTaeg" style="font-size:18px;color:var(--gold);">–</div>
-                </div>
-              </div>
-
-              <!-- Taux d'endettement -->
-              <div class="panel">
-                <div class="flex-between" style="margin-bottom:8px;">
-                  <div class="panel-title">Taux d'endettement</div>
-                  <span id="loanEndettementBadge" class="badge badge-neutral">–</span>
-                </div>
-                <div style="font-size:13px;color:var(--muted2);margin-bottom:10px;">
-                  Votre mensualité représente <span id="loanEndettementPct" style="color:var(--text);font-weight:600;">–</span> de votre revenu net.
-                  <br>Le plafond légal recommandé est de <b style="color:var(--text);">35%</b>.
-                </div>
-                <div class="progress-bar" style="height:8px;border-radius:4px;">
-                  <div id="loanEndettementBar" class="progress-fill" style="height:8px;border-radius:4px;background:var(--green);transition:width 0.5s;"></div>
-                </div>
-                <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted2);margin-top:4px;">
-                  <span>0%</span><span style="color:var(--gold);">35%</span><span>70%+</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Graphique amortissement -->
-          <div class="panel" style="margin-bottom:20px;">
-            <div class="panel-header">
-              <div class="panel-title">Tableau d'amortissement</div>
-              <span class="text-xs color-muted2">Capital remboursé vs intérêts payés</span>
-            </div>
-            <div style="height:200px;margin-bottom:16px;"><canvas id="chartAmortissement"></canvas></div>
-            <div id="loanAmortTable" style="max-height:280px;overflow-y:auto;"></div>
-          </div>
-        </div>
-
-        <!-- ══ ONGLET 2 : CAPACITÉ D'EMPRUNT ══ -->
-        <div id="loan-capacite" style="display:none;">
-          <div class="grid-2" style="margin-bottom:20px;">
-            <div class="panel">
-              <div class="panel-header"><div class="panel-title">Votre situation financière</div></div>
-
-              <div class="field-group">
-                <label class="field-label">Revenus nets mensuels (€)</label>
-                <input class="field-input" type="number" id="capRevenu" placeholder="3000" oninput="calcCapacite()">
-                <div style="font-size:11px;color:var(--muted2);margin-top:4px;">Salaire + primes + revenus locatifs…</div>
-              </div>
-
-              <div class="field-group">
-                <label class="field-label">Charges mensuelles actuelles (€)</label>
-                <input class="field-input" type="number" id="capCharges" placeholder="0" oninput="calcCapacite()">
-                <div style="font-size:11px;color:var(--muted2);margin-top:4px;">Autres crédits en cours, pensions…</div>
-              </div>
-
-              <div class="field-group">
-                <label class="field-label">Apport disponible (€)</label>
-                <input class="field-input" type="number" id="capApport" placeholder="30000" oninput="calcCapacite()">
-              </div>
-
-              <div class="field-group">
-                <label class="field-label">Durée souhaitée (ans)</label>
-                <input type="range" id="capDuree" min="5" max="30" value="20" step="1"
-                  oninput="document.getElementById('capDureeLabel').textContent=this.value+' ans'; calcCapacite()"
-                  style="width:100%;accent-color:var(--accent);margin-bottom:4px;">
-                <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted2);">
-                  <span>5 ans</span><span id="capDureeLabel" style="color:var(--text);font-weight:600;">20 ans</span><span>30 ans</span>
-                </div>
-              </div>
-
-              <div class="field-group">
-                <label class="field-label">Taux d'intérêt (%)</label>
-                <input type="range" id="capRate" min="0.5" max="8" value="3.5" step="0.05"
-                  oninput="document.getElementById('capRateLabel').textContent=parseFloat(this.value).toFixed(2)+'%'; calcCapacite()"
-                  style="width:100%;accent-color:var(--accent);margin-bottom:4px;">
-                <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted2);">
-                  <span>0.5%</span><span id="capRateLabel" style="color:var(--text);font-weight:600;">3.50%</span><span>8%</span>
-                </div>
-              </div>
-
-              <div class="field-group">
-                <label class="field-label">Taux d'endettement max souhaité</label>
-                <div style="display:flex;gap:8px;">
-                  <button class="loan-tab" onclick="setEndettement(25,this)">25%</button>
-                  <button class="loan-tab active" onclick="setEndettement(33,this)">33%</button>
-                  <button class="loan-tab" onclick="setEndettement(35,this)">35%</button>
-                </div>
-                <input type="hidden" id="capEndettement" value="33">
-              </div>
-            </div>
-
-            <div>
-              <!-- Résultat capacité -->
-              <div style="background:linear-gradient(135deg,rgba(139,92,246,0.1),rgba(139,92,246,0.05));border:1px solid rgba(139,92,246,0.2);border-radius:10px;padding:24px;margin-bottom:12px;text-align:center;">
-                <div style="font-size:12px;color:var(--muted2);font-weight:500;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Capacité d'emprunt maximale</div>
-                <div id="capMax" style="font-size:44px;font-weight:600;letter-spacing:-2px;color:var(--accent2);">–</div>
-                <div style="font-size:13px;color:var(--muted2);margin-top:6px;">dont <span id="capApportDisplay" style="color:var(--text);">–</span> d'apport</div>
-              </div>
-
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
-                <div class="kpi-card" style="text-align:center;padding:14px;">
-                  <div class="kpi-label">Mensualité max</div>
-                  <div class="kpi-value" id="capMensualite" style="font-size:18px;">–</div>
-                </div>
-                <div class="kpi-card" style="text-align:center;padding:14px;">
-                  <div class="kpi-label">Reste à vivre</div>
-                  <div class="kpi-value" id="capRav" style="font-size:18px;color:var(--green);">–</div>
-                </div>
-                <div class="kpi-card" style="text-align:center;padding:14px;">
-                  <div class="kpi-label">Budget max avec frais notaire</div>
-                  <div class="kpi-value" id="capBudgetTotal" style="font-size:18px;color:var(--gold);">–</div>
-                </div>
-                <div class="kpi-card" style="text-align:center;padding:14px;">
-                  <div class="kpi-label">Revenu restant charges</div>
-                  <div class="kpi-value" id="capRevenuDispo" style="font-size:18px;">–</div>
-                </div>
-              </div>
-
-              <!-- Scénarios -->
-              <div class="panel">
-                <div class="panel-header"><div class="panel-title">Scénarios selon la durée</div></div>
-                <div id="capScenarios"></div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Profil emprunteur -->
-          <div class="panel">
-            <div class="panel-header"><div class="panel-title">💡 Conseils personnalisés</div></div>
-            <div id="capConseils"></div>
-          </div>
-        </div>
-
-        <!-- ══ ONGLET 3 : COMPARATIF BANQUES ══ -->
-        <div id="loan-comparatif" style="display:none;">
-          <div class="panel" style="margin-bottom:16px;">
-            <div class="panel-header"><div class="panel-title">Paramètres de comparaison</div></div>
-            <div class="grid-2">
-              <div class="field-group">
-                <label class="field-label">Montant emprunté (€)</label>
-                <input class="field-input" type="number" id="compMontant" placeholder="270000" oninput="calcComparatif()">
-              </div>
-              <div class="field-group">
-                <label class="field-label">Durée (ans)</label>
-                <select class="field-input" id="compDuree" onchange="calcComparatif()">
-                  <option value="10">10 ans</option>
-                  <option value="15">15 ans</option>
-                  <option value="20" selected>20 ans</option>
-                  <option value="25">25 ans</option>
-                  <option value="30">30 ans</option>
-                </select>
-              </div>
-            </div>
-          </div>
-
-          <div class="panel">
-            <div class="panel-header"><div class="panel-title">Comparatif des principales banques françaises</div>
-              <span class="text-xs color-muted2">Taux indicatifs — contactez les banques pour une offre personnalisée</span>
-            </div>
-            <div id="compTable"></div>
-          </div>
-        </div>
-      </section>
-
-      <!-- ══════════════════════════════════════
-           PAGE: SETTINGS
-      ══════════════════════════════════════ -->
-      <section class="page-section" id="page-settings">
-        <div class="section-title">Paramètres</div>
-        <div class="section-sub">Configurez votre espace Patrimonia</div>
-
-        <!-- ── SUPABASE CONFIG ── -->
-        <div class="panel" style="margin-bottom:16px;">
-          <div class="panel-header">
-            <div class="panel-title">☁️ Synchronisation cloud</div>
-            <span id="dbStatusBadge" class="badge badge-neutral">Non configuré</span>
-          </div>
-          <div style="font-size:13px;color:var(--muted2);margin-bottom:16px;line-height:1.6;">
-            Connectez une base de données <b style="color:var(--text)">Supabase gratuite</b> pour sauvegarder vos données dans le cloud.
-            Vos données survivront à tout changement de navigateur ou d'appareil.
-          </div>
-          <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:16px;">
-            <div style="font-size:12px;font-weight:600;color:var(--accent2);margin-bottom:10px;">Comment configurer (2 minutes) :</div>
-            <ol style="font-size:12px;color:var(--muted2);line-height:2;padding-left:16px;">
-              <li>Allez sur <b style="color:var(--text)">supabase.com</b> → Créer un compte gratuit</li>
-              <li>Créez un nouveau projet (choisissez une région Europe)</li>
-              <li>Dans <b style="color:var(--text)">Settings → API</b> → copiez l'URL et la clé <code>anon public</code></li>
-              <li>Dans <b style="color:var(--text)">Table Editor</b> → cliquez "New Table" → nommez-la <code>patrimonia_data</code></li>
-              <li>Ajoutez ces colonnes : <code>username (text, primary key)</code> · <code>data (jsonb)</code> · <code>updated_at (timestamptz)</code></li>
-              <li>Collez l'URL et la clé ci-dessous et cliquez Connecter</li>
-            </ol>
-          </div>
-          <div class="form-grid">
-            <div class="form-full">
-              <label class="field-label">URL du projet Supabase</label>
-              <input class="field-input" type="url" id="supabaseUrl" placeholder="https://xxxxxxxxxxxx.supabase.co" />
-            </div>
-            <div class="form-full">
-              <label class="field-label">Clé publique (anon key)</label>
-              <input class="field-input" type="password" id="supabaseKey" placeholder="eyJhbGci..." />
-            </div>
-          </div>
-          <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
-            <button class="btn btn-accent" onclick="connectSupabase()">☁️ Connecter & sauvegarder</button>
-            <button class="btn btn-ghost" onclick="syncFromCloud()">⬇ Restaurer depuis le cloud</button>
-            <button class="btn btn-ghost" onclick="testSupabase()">🔍 Tester la connexion</button>
-          </div>
-          <div id="supabaseMsg" style="font-size:12px;margin-top:10px;"></div>
-        </div>
-
-        <div class="grid-2">
-          <div class="panel">
-            <div class="panel-header"><div class="panel-title">Affichage</div></div>
-            <div class="field-group">
-              <label class="field-label">Thème</label>
-              <div style="display:flex;gap:8px;">
-                <button onclick="setTheme('dark')" id="btnDark"
-                  style="flex:1;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);cursor:pointer;font-size:13px;font-weight:500;transition:all 0.2s;font-family:inherit;">
-                  🌙 Sombre
-                </button>
-                <button onclick="setTheme('light')" id="btnLight"
-                  style="flex:1;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);cursor:pointer;font-size:13px;font-weight:500;transition:all 0.2s;font-family:inherit;">
-                  ☀️ Clair
-                </button>
-              </div>
-            </div>
-            <div class="field-group">
-              <label class="field-label">Devise principale</label>
-              <select class="field-input" id="currency">
-                <option value="EUR">EUR (€)</option>
-                <option value="USD">USD ($)</option>
-                <option value="GBP">GBP (£)</option>
-                <option value="CHF">CHF</option>
-              </select>
-            </div>
-            <div class="field-group">
-              <label class="field-label">Seuil de surexposition (%)</label>
-              <input class="field-input" type="number" id="exposureThreshold" value="20" />
-            </div>
-            <button class="btn btn-accent" onclick="saveSettings()">Sauvegarder</button>
-          </div>
-
-          <div class="panel">
-            <div class="panel-header"><div class="panel-title">Données locales</div></div>
-            <div class="field-group" style="display:flex;flex-direction:column;gap:8px;">
-              <button class="btn btn-ghost w-full" onclick="exportData()">📥 Exporter (JSON)</button>
-              <button class="btn btn-ghost w-full" onclick="importData()">📤 Importer (JSON)</button>
-              <input type="file" id="importFile" style="display:none" accept=".json" onchange="handleImport(event)">
-              <button class="btn btn-danger w-full" onclick="clearData()">🗑️ Réinitialiser les données</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- ── SUPPRESSION DE COMPTE ── -->
-        <div class="panel" style="border-color:rgba(239,68,68,0.2);">
-          <div class="panel-header">
-            <div class="panel-title" style="color:var(--red);">⚠️ Zone dangereuse</div>
-          </div>
-          <div style="font-size:13px;color:var(--muted2);margin-bottom:16px;line-height:1.6;">
-            La suppression de votre compte efface définitivement toutes vos données locales et cloud. Cette action est <b style="color:var(--red)">irréversible</b>.
-          </div>
-          <button class="btn btn-danger" onclick="openModal('deleteAccount')">Supprimer mon compte</button>
-        </div>
-      </section>
-
-      <!-- ══════════════════════════════════════
-           PAGE: SIMULATION PRÊT BANCAIRE
-      ══════════════════════════════════════ -->
-      <section class="page-section" id="page-pret">
-        <div class="section-title">🏠 Simulation de prêt bancaire</div>
-        <div class="section-sub">Mensualités, capacité d'emprunt et coût total du crédit</div>
-
-        <!-- ── TABS ── -->
-        <div style="display:flex;gap:2px;background:var(--surface2);border-radius:8px;padding:3px;margin-bottom:20px;width:fit-content;">
-          <button id="tabMens" onclick="switchPretTab('mensualite')"
-            style="padding:7px 16px;border-radius:6px;border:none;font-family:'Aptos','Segoe UI','Inter',system-ui,sans-serif;font-size:13px;font-weight:500;cursor:pointer;transition:all .15s;background:var(--accent);color:white;">
-            Mensualités
-          </button>
-          <button id="tabCapa" onclick="switchPretTab('capacite')"
-            style="padding:7px 16px;border-radius:6px;border:none;font-family:'Aptos','Segoe UI','Inter',system-ui,sans-serif;font-size:13px;font-weight:400;cursor:pointer;transition:all .15s;background:transparent;color:var(--muted2);">
-            Capacité d'emprunt
-          </button>
-          <button id="tabComp" onclick="switchPretTab('comparatif')"
-            style="padding:7px 16px;border-radius:6px;border:none;font-family:'Aptos','Segoe UI','Inter',system-ui,sans-serif;font-size:13px;font-weight:400;cursor:pointer;transition:all .15s;background:transparent;color:var(--muted2);">
-            Comparatif banques
-          </button>
-        </div>
-
-        <!-- ══ TAB 1 : MENSUALITÉS ══ -->
-        <div id="tabContent-mensualite">
-          <div class="grid-2" style="margin-bottom:20px;">
-            <div class="panel">
-              <div class="panel-header"><div class="panel-title">Paramètres du prêt</div></div>
-              <div class="field-group">
-                <label class="field-label">Prix du bien (€)</label>
-                <input class="field-input" type="number" id="prixBien" placeholder="300000" value="300000" oninput="calcMensualite()">
-              </div>
-              <div class="field-group">
-                <label class="field-label">Apport personnel (€)</label>
-                <input class="field-input" type="number" id="apport" placeholder="30000" value="30000" oninput="calcMensualite()">
-              </div>
-              <div style="background:var(--surface2);border-radius:8px;padding:10px 14px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;">
-                <span style="font-size:12px;color:var(--muted2);">Capital à emprunter</span>
-                <span id="capitalEmprunte" style="font-size:15px;font-weight:600;">–</span>
-              </div>
-              <div class="field-group">
-                <label class="field-label">Taux d'intérêt annuel (%)</label>
-                <input class="field-input" type="range" id="tauxPret" min="0.5" max="7" step="0.05" value="3.5" oninput="document.getElementById('tauxPretVal').textContent=parseFloat(this.value).toFixed(2)+'%'; calcMensualite()">
-                <div class="flex-between text-xs color-muted mt-8"><span>0.5%</span><b id="tauxPretVal" style="color:var(--text);">3.50%</b><span>7%</span></div>
-              </div>
-              <div class="field-group">
-                <label class="field-label">Durée du prêt (ans)</label>
-                <input class="field-input" type="range" id="dureePret" min="5" max="30" step="1" value="20" oninput="document.getElementById('dureePretVal').textContent=this.value+' ans'; calcMensualite()">
-                <div class="flex-between text-xs color-muted mt-8"><span>5 ans</span><b id="dureePretVal" style="color:var(--text);">20 ans</b><span>30 ans</span></div>
-              </div>
-              <div class="field-group">
-                <label class="field-label">Assurance emprunteur (%/an)</label>
-                <input class="field-input" type="number" id="assurancePret" placeholder="0.30" value="0.30" step="0.01" oninput="calcMensualite()">
-              </div>
-              <div class="field-group">
-                <label class="field-label">Frais de notaire (€)</label>
-                <input class="field-input" type="number" id="fraisNotaire" placeholder="20000" value="20000" oninput="calcMensualite()">
-              </div>
-            </div>
-
-            <!-- Résultats -->
-            <div>
-              <!-- Mensualité principale -->
-              <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:24px;margin-bottom:12px;text-align:center;">
-                <div style="font-size:12px;color:var(--muted2);font-weight:500;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Mensualité totale</div>
-                <div id="mensualiteTotale" style="font-size:44px;font-weight:600;letter-spacing:-2px;color:var(--accent2);">–</div>
-                <div style="font-size:12px;color:var(--muted2);margin-top:4px;">dont assurance : <span id="partAssurance" style="color:var(--text);">–</span></div>
-              </div>
-
-              <!-- KPIs résumé -->
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
-                <div class="panel" style="padding:14px;text-align:center;">
-                  <div style="font-size:11px;color:var(--muted2);margin-bottom:4px;">Capital emprunté</div>
-                  <div id="resCapital" style="font-size:18px;font-weight:600;">–</div>
-                </div>
-                <div class="panel" style="padding:14px;text-align:center;">
-                  <div style="font-size:11px;color:var(--muted2);margin-bottom:4px;">Coût total intérêts</div>
-                  <div id="resTotalInterets" style="font-size:18px;font-weight:600;color:var(--red);">–</div>
-                </div>
-                <div class="panel" style="padding:14px;text-align:center;">
-                  <div style="font-size:11px;color:var(--muted2);margin-bottom:4px;">Coût total crédit</div>
-                  <div id="resTotalCredit" style="font-size:18px;font-weight:600;">–</div>
-                </div>
-                <div class="panel" style="padding:14px;text-align:center;">
-                  <div style="font-size:11px;color:var(--muted2);margin-bottom:4px;">Taux effort (si salaire)</div>
-                  <div id="resTauxEffort" style="font-size:18px;font-weight:600;">–</div>
-                </div>
-              </div>
-
-              <!-- Conseil apport -->
-              <div id="conseilApport" style="border-radius:8px;padding:12px 14px;font-size:12px;line-height:1.6;"></div>
-            </div>
-          </div>
-
-          <!-- Graphique amortissement -->
-          <div class="panel" style="margin-bottom:20px;">
-            <div class="panel-header">
-              <div class="panel-title">Tableau d'amortissement</div>
-              <div style="display:flex;gap:8px;align-items:center;">
-                <span class="text-xs" style="color:var(--muted2);">Année <span id="amortYearLabel">1</span></span>
-                <input type="range" id="amortYear" min="1" max="30" value="1" style="width:100px;accent-color:var(--accent);" oninput="document.getElementById('amortYearLabel').textContent=this.value; updateAmortChart()">
-              </div>
-            </div>
-            <div style="height:220px;"><canvas id="chartAmort"></canvas></div>
-          </div>
-
-          <!-- Tableau annuel -->
-          <div class="panel">
-            <div class="panel-header"><div class="panel-title">Synthèse annuelle</div></div>
-            <div style="overflow-x:auto;">
-              <table class="data-table" id="amortTable">
-                <thead><tr>
-                  <th>Année</th><th>Capital restant</th><th>Intérêts payés</th><th>Capital remboursé</th><th>Total payé</th>
-                </tr></thead>
-                <tbody id="amortTbody"></tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
-        <!-- ══ TAB 2 : CAPACITÉ D'EMPRUNT ══ -->
-        <div id="tabContent-capacite" style="display:none;">
-          <div class="grid-2" style="margin-bottom:20px;">
-            <div class="panel">
-              <div class="panel-header"><div class="panel-title">Votre situation financière</div></div>
-              <div class="field-group">
-                <label class="field-label">Revenus nets mensuels (€)</label>
-                <input class="field-input" type="number" id="revenusMensuels" placeholder="3500" oninput="calcCapacite()">
-              </div>
-              <div class="field-group">
-                <label class="field-label">Charges mensuelles actuelles (€)</label>
-                <input class="field-input" type="number" id="chargesMensuelles" placeholder="500" value="0" oninput="calcCapacite()">
-              </div>
-              <div class="field-group">
-                <label class="field-label">Apport disponible (€)</label>
-                <input class="field-input" type="number" id="apportCapa" placeholder="30000" oninput="calcCapacite()">
-              </div>
-              <div class="field-group">
-                <label class="field-label">Taux d'intérêt (%)</label>
-                <input class="field-input" type="number" id="tauxCapa" placeholder="3.5" value="3.5" step="0.1" oninput="calcCapacite()">
-              </div>
-              <div class="field-group">
-                <label class="field-label">Durée souhaitée (ans)</label>
-                <select class="field-input" id="dureeCapa" onchange="calcCapacite()">
-                  <option value="10">10 ans</option>
-                  <option value="15">15 ans</option>
-                  <option value="20" selected>20 ans</option>
-                  <option value="25">25 ans</option>
-                  <option value="30">30 ans</option>
-                </select>
-              </div>
-              <div class="field-group">
-                <label class="field-label">Taux d'endettement max (%)</label>
-                <select class="field-input" id="tauxEndetMax" onchange="calcCapacite()">
-                  <option value="33">33% (règle classique)</option>
-                  <option value="35" selected>35% (limite HCSF)</option>
-                  <option value="40">40% (avec reste à vivre)</option>
-                </select>
-              </div>
-            </div>
-
-            <div>
-              <!-- Capacité d'emprunt -->
-              <div style="background:linear-gradient(135deg,rgba(139,92,246,0.08),transparent);border:1px solid rgba(139,92,246,0.2);border-radius:10px;padding:24px;margin-bottom:12px;text-align:center;">
-                <div style="font-size:12px;color:var(--muted2);font-weight:500;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Capacité d'emprunt</div>
-                <div id="capaciteEmprunt" style="font-size:40px;font-weight:600;letter-spacing:-1.5px;color:var(--accent2);">–</div>
-                <div style="font-size:13px;color:var(--muted2);margin-top:6px;">Budget total avec apport : <span id="budgetTotal" style="color:var(--text);font-weight:600;">–</span></div>
-              </div>
-
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
-                <div class="panel" style="padding:14px;text-align:center;">
-                  <div style="font-size:11px;color:var(--muted2);margin-bottom:4px;">Mensualité max</div>
-                  <div id="mensualiteMax" style="font-size:18px;font-weight:600;color:var(--accent2);">–</div>
-                </div>
-                <div class="panel" style="padding:14px;text-align:center;">
-                  <div style="font-size:11px;color:var(--muted2);margin-bottom:4px;">Reste à vivre</div>
-                  <div id="resteAVivre" style="font-size:18px;font-weight:600;">–</div>
-                </div>
-                <div class="panel" style="padding:14px;text-align:center;">
-                  <div style="font-size:11px;color:var(--muted2);margin-bottom:4px;">Taux d'endettement</div>
-                  <div id="tauxEndettement" style="font-size:18px;font-weight:600;">–</div>
-                </div>
-                <div class="panel" style="padding:14px;text-align:center;">
-                  <div style="font-size:11px;color:var(--muted2);margin-bottom:4px;">Apport recommandé</div>
-                  <div id="apportReco" style="font-size:18px;font-weight:600;color:var(--green);">–</div>
-                </div>
-              </div>
-
-              <div id="conseilCapacite" style="border-radius:8px;padding:12px 14px;font-size:12px;line-height:1.7;"></div>
-            </div>
-          </div>
-
-          <!-- Graphique capacité selon durée -->
-          <div class="panel">
-            <div class="panel-header"><div class="panel-title">Capacité d'emprunt selon la durée</div></div>
-            <div style="height:220px;"><canvas id="chartCapacite"></canvas></div>
-          </div>
-        </div>
-
-        <!-- ══ TAB 3 : COMPARATIF ══ -->
-        <div id="tabContent-comparatif" style="display:none;">
-          <div class="panel" style="margin-bottom:16px;">
-            <div class="panel-header"><div class="panel-title">Paramètres communs</div></div>
+      <section id="credit" class="section">
+        <div class="card" style="max-width:800px; margin:0 auto;">
+          <div class="card-header"><span class="card-title">Simulateur de Prêt Immobilier</span></div>
+          <div class="card-body">
             <div class="form-grid">
               <div>
-                <label class="field-label">Capital à emprunter (€)</label>
-                <input class="field-input" type="number" id="compCapital" placeholder="270000" value="270000" oninput="calcComparatif()">
+                <label class="field-label">Montant du prêt (€)</label>
+                <input class="field-input" type="number" id="loanAmount" value="200000">
               </div>
               <div>
-                <label class="field-label">Durée (ans)</label>
-                <select class="field-input" id="compDuree" onchange="calcComparatif()">
-                  <option value="15">15 ans</option>
-                  <option value="20" selected>20 ans</option>
-                  <option value="25">25 ans</option>
-                  <option value="30">30 ans</option>
-                </select>
+                <label class="field-label">Durée (années)</label>
+                <input class="field-input" type="number" id="loanYears" value="20">
               </div>
             </div>
-          </div>
-
-          <!-- Tableau comparatif banques -->
-          <div class="panel" style="margin-bottom:16px;">
-            <div class="panel-header"><div class="panel-title">Comparatif par taux</div></div>
-            <div style="overflow-x:auto;">
-              <table class="data-table" id="compTable">
-                <thead><tr>
-                  <th>Taux</th><th>Mensualité</th><th>Total intérêts</th><th>Coût total</th><th>Économie vs 4%</th>
-                </tr></thead>
-                <tbody id="compTbody"></tbody>
-              </table>
-            </div>
-          </div>
-
-          <!-- Graphique comparatif -->
-          <div class="panel">
-            <div class="panel-header"><div class="panel-title">Coût total selon le taux</div></div>
-            <div style="height:220px;"><canvas id="chartComp"></canvas></div>
-          </div>
-        </div>
-
-      </section>
-
-      <!-- ══════════════════════════════════════
-           PAGE: FISCALITÉ
-      ══════════════════════════════════════ -->
-      <section class="page-section" id="page-fiscalite">
-        <div class="section-title">🏛️ Fiscalité</div>
-        <div class="section-sub">Simulez vos impôts et optimisez votre situation fiscale</div>
-
-        <!-- Formulaire profil fiscal -->
-        <div class="grid-2" style="margin-bottom:24px;">
-          <div class="panel">
-            <div class="panel-header">
-              <div class="panel-title">Mon profil fiscal</div>
-              <button class="panel-action" onclick="calculateTax()">Calculer →</button>
-            </div>
-            <div class="form-grid">
-              <div>
-                <label class="field-label">Âge</label>
-                <input class="field-input" type="number" id="taxAge" placeholder="30" oninput="calculateTax()">
-              </div>
-              <div>
-                <label class="field-label">Situation familiale / statut</label>
-                <select class="field-input" id="taxSituation" onchange="calculateTax()">
-                  <optgroup label="Situations classiques">
-                    <option value="single">Célibataire</option>
-                    <option value="married">Marié(e) / PACS</option>
-                    <option value="married_children1">Marié(e) + 1 enfant</option>
-                    <option value="married_children2">Marié(e) + 2 enfants</option>
-                    <option value="married_children3">Marié(e) + 3 enfants</option>
-                    <option value="single_parent1">Parent isolé + 1 enfant</option>
-                    <option value="single_parent2">Parent isolé + 2 enfants</option>
-                  </optgroup>
-                  <optgroup label="🎓 Statuts avec exonérations spéciales">
-                    <option value="etudiant">📚 Étudiant (job étudiant)</option>
-                    <option value="apprenti">🎓 Apprenti / alternant</option>
-                  </optgroup>
-                </select>
-              </div>
-
-              <!-- Bannière exonération (affichée si étudiant/apprenti) -->
-              <div id="exonerationBanner" style="display:none;grid-column:1/-1;background:rgba(34,197,94,0.07);border:1px solid rgba(34,197,94,0.25);border-radius:10px;padding:14px 16px;"></div>
-              <div>
-                <label class="field-label">Salaire brut annuel (€)</label>
-                <input class="field-input" type="number" id="taxGross" placeholder="40000" oninput="calculateTax()">
-              </div>
-              <div>
-                <label class="field-label">Autres revenus annuels (€)</label>
-                <input class="field-input" type="number" id="taxOther" placeholder="0" oninput="calculateTax()">
-              </div>
-              <div>
-                <label class="field-label">Plus-values mobilières (€)</label>
-                <input class="field-input" type="number" id="taxCapGain" placeholder="0" oninput="calculateTax()">
-              </div>
-              <div>
-                <label class="field-label">Dividendes perçus (€)</label>
-                <input class="field-input" type="number" id="taxDividends" placeholder="0" oninput="calculateTax()">
-              </div>
-              <div>
-                <label class="field-label">Versements PER (€/an)</label>
-                <input class="field-input" type="number" id="taxPer" placeholder="0" oninput="calculateTax()">
-              </div>
-              <div>
-                <label class="field-label">Dons associations (€/an)</label>
-                <input class="field-input" type="number" id="taxDons" placeholder="0" oninput="calculateTax()">
-              </div>
-            </div>
-          </div>
-
-          <!-- Résultat impôt -->
-          <div>
-            <div class="highlight-card" style="margin-bottom:16px;">
-              <div class="flex-between" style="flex-wrap:wrap;gap:12px;">
-                <div>
-                  <div class="kpi-label">Impôt sur le revenu estimé</div>
-                  <div class="kpi-value color-danger" id="taxResult">–</div>
-                  <div class="text-xs color-muted mt-8" id="taxTMI">Tranche marginale : –</div>
-                </div>
-                <div style="text-align:right;">
-                  <div class="kpi-label">Taux effectif</div>
-                  <div class="kpi-value" id="taxRate">–%</div>
-                </div>
-              </div>
-            </div>
-            <div class="panel" style="margin-bottom:16px;">
-              <div class="panel-header"><div class="panel-title">Décomposition</div></div>
-              <div id="taxBreakdown"></div>
-            </div>
-            <div class="panel">
-              <div class="panel-header"><div class="panel-title">Flat Tax vs Barème</div></div>
-              <div id="taxFlatvsBareme"></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Optimisations -->
-        <div class="panel" style="margin-bottom:24px;">
-          <div class="panel-header"><div class="panel-title">💡 Optimisations fiscales personnalisées</div></div>
-          <div id="taxOptimizations"></div>
-        </div>
-
-        <!-- Enveloppes fiscales -->
-        <div class="grid-3">
-          <div class="panel">
-            <div class="panel-header"><div class="panel-title">📗 PEA</div></div>
-            <div class="text-xs color-muted" style="line-height:1.7;margin-bottom:12px;">
-              <b style="color:var(--accent)">Avantage :</b> Plus-values et dividendes <b>exonérés d'IR</b> après 5 ans (seulement 17.2% prélèvements sociaux)<br>
-              <b style="color:var(--accent)">Plafond :</b> 150 000 € de versements<br>
-              <b style="color:var(--accent)">Idéal pour :</b> ETF monde, actions européennes
-            </div>
-            <div id="peaStatus" class="text-sm"></div>
-          </div>
-          <div class="panel">
-            <div class="panel-header"><div class="panel-title">📘 Assurance-Vie</div></div>
-            <div class="text-xs color-muted" style="line-height:1.7;margin-bottom:12px;">
-              <b style="color:var(--accent2)">Avantage :</b> Abattement de <b>4 600€/an</b> (9 200€ couple) sur les gains après 8 ans<br>
-              <b style="color:var(--accent2)">Taux :</b> 7.5% IR + 17.2% PS (si &lt; 150k€ versé)<br>
-              <b style="color:var(--accent2)">Idéal pour :</b> Diversification, transmission
-            </div>
-            <div id="avStatus" class="text-sm"></div>
-          </div>
-          <div class="panel">
-            <div class="panel-header"><div class="panel-title">📙 PER</div></div>
-            <div class="text-xs color-muted" style="line-height:1.7;margin-bottom:12px;">
-              <b style="color:var(--gold)">Avantage :</b> Versements <b>déductibles du revenu imposable</b> (dans la limite de ~10% salaire brut)<br>
-              <b style="color:var(--gold)">Plafond :</b> 10% des revenus N-1 (max ~35 194€)<br>
-              <b style="color:var(--gold)">Idéal pour :</b> TMI élevée, préparer la retraite
-            </div>
-            <div id="perStatus" class="text-sm"></div>
-          </div>
-        </div>
-
-        <!-- ── RÉGIMES SPÉCIAUX ÉTUDIANT / APPRENTI ── -->
-        <div id="regimesSpeciaux" style="display:none;margin-top:24px;">
-          <div class="panel">
-            <div class="panel-header">
-              <div class="panel-title" id="regimesTitle">🎓 Votre régime fiscal spécial</div>
-            </div>
-            <div id="regimesContent"></div>
-          </div>
-        </div>
-
-        <!-- Simulateur PER -->
-        <div class="panel" style="margin-top:24px;">
-          <div class="panel-header"><div class="panel-title">🔮 Simulateur d'économie PER</div></div>
-          <div class="grid-2">
-            <div>
-              <div class="field-group">
-                <label class="field-label">Versement PER annuel (€)</label>
-                <input class="field-input" type="range" id="perSimSlider" min="500" max="10000" value="2000" step="100" oninput="document.getElementById('perSimVal').textContent=this.value+'€'; updatePerSim()">
-                <div class="flex-between text-xs color-muted mt-8"><span>500€</span><span id="perSimVal">2 000€</span><span>10 000€</span></div>
-              </div>
-              <div id="perSimResult" style="margin-top:16px;"></div>
-            </div>
-            <div class="chart-wrap"><canvas id="chartPerSim"></canvas></div>
+            <button class="btn btn-accent" style="width:100%;" onclick="runCreditSim()">Calculer les meilleures offres</button>
+            <div id="creditResults" style="margin-top:24px;"></div>
           </div>
         </div>
       </section>
 
-    </div><!-- /content -->
+    </div>
   </main>
 
-  <!-- ── BOTTOM NAV (toujours visible) ── -->
-  <nav class="mobile-nav">
-    <button class="mobile-nav-item active" onclick="navigate('overview')" id="mn-overview">
-      <span class="mn-icon">🏠</span>Accueil
-    </button>
-    <button class="mobile-nav-item" onclick="navigate('portfolio')" id="mn-portfolio">
-      <span class="mn-icon">📈</span>Portef.
-    </button>
-    <button class="mobile-nav-item" onclick="navigate('savings')" id="mn-savings">
-      <span class="mn-icon">🏦</span>Épargne
-    </button>
-    <button class="mobile-nav-item" onclick="navigate('salary')" id="mn-salary">
-      <span class="mn-icon">💼</span>Budget
-    </button>
-    <button class="mobile-nav-item" onclick="navigate('dividends')" id="mn-dividends">
-      <span class="mn-icon">💰</span>Divid.
-    </button>
-    <button class="mobile-nav-item" onclick="navigate('projection')" id="mn-projection">
-      <span class="mn-icon">🚀</span>DCA
-    </button>
-    <button class="mobile-nav-item" onclick="navigate('ai')" id="mn-ai">
-      <span class="mn-icon">🤖</span>IA
-    </button>
-    <button class="mobile-nav-item" onclick="navigate('fiscalite')" id="mn-fiscalite">
-      <span class="mn-icon">🏛️</span>Fiscalité
-    </button>
-    <button class="mobile-nav-item" onclick="navigate('loan')" id="mn-loan">
-      <span class="mn-icon">🏠</span>Prêt
-    </button>
-    <button class="mobile-nav-item" onclick="navigate('fees')" id="mn-fees">
-      <span class="mn-icon">🔍</span>Frais
-    </button>
-    <button class="mobile-nav-item" onclick="navigate('analysis')" id="mn-analysis">
-      <span class="mn-icon">🌍</span>Analyse
-    </button>
-    <button class="mobile-nav-item" onclick="navigate('sources')" id="mn-sources">
-      <span class="mn-icon">🔗</span>Sources
-    </button>
-    <button class="mobile-nav-item" onclick="navigate('settings')" id="mn-settings">
-      <span class="mn-icon">⚙️</span>Params
-    </button>
-  </nav>
-
-  <!-- Modal : Suppression de compte -->
-  <div class="modal-overlay" id="modal-deleteAccount">
-    <div class="modal" style="max-width:420px;border-color:rgba(239,68,68,0.3);">
-      <div class="modal-header">
-        <div class="modal-title" style="color:var(--red);">⚠️ Supprimer mon compte</div>
-        <button class="close-btn" onclick="closeModal('deleteAccount')">✕</button>
-      </div>
-      <div style="font-size:13px;color:var(--muted2);margin-bottom:20px;line-height:1.7;">
-        Cette action va supprimer <b style="color:var(--text)">définitivement</b> :
-        <ul style="margin-top:8px;padding-left:16px;line-height:2;">
-          <li>Toutes vos données locales (actifs, historique, paramètres)</li>
-          <li>Votre profil et mot de passe</li>
-          <li>Vos données cloud Supabase (si configuré)</li>
-        </ul>
-      </div>
-      <div class="field-group" style="margin-bottom:16px;">
-        <label class="field-label">Tapez <b style="color:var(--red)">SUPPRIMER</b> pour confirmer</label>
-        <input class="field-input" type="text" id="deleteConfirmInput" placeholder="SUPPRIMER" />
-      </div>
-      <div style="display:flex;gap:8px;">
-        <button class="btn btn-ghost" style="flex:1;" onclick="closeModal('deleteAccount')">Annuler</button>
-        <button class="btn btn-danger" style="flex:1;" onclick="deleteAccount()">Supprimer définitivement</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Splash screen -->
-  <div class="splash" id="splash">
-    <div class="splash-logo">₩</div>
-    <div class="splash-name">Patrim<b>onia</b></div>
-    <div class="splash-sub">Chargement…</div>
-  </div>
-
-  <!-- ══════════════════════════════════════
-       MODALS
-  ══════════════════════════════════════ -->
-  <div class="modal-overlay" id="modal-addAsset">
-    <div class="modal">
-      <div class="modal-header">
-        <div class="modal-title">Ajouter un actif</div>
-        <button class="close-btn" onclick="closeModal('addAsset')">✕</button>
+  <div class="modal-overlay" id="modalAddAsset" onclick="closeModal('addAsset')">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-title">Ajouter un actif</div>
+      <div class="fg">
+        <label class="field-label">Nom de l'actif</label>
+        <input class="field-input" id="assetName" placeholder="Ex: PEA Boursorama, Appartement Lyon...">
       </div>
       <div class="form-grid">
-        <div class="form-full">
-          <label class="field-label">Nom / Ticker</label>
-          <input class="field-input" id="assetName" placeholder="ex: MSFT, BTC, ETF Amundi...">
+        <div>
+          <label class="field-label">Valeur actuelle (€)</label>
+          <input class="field-input" type="number" id="assetVal" placeholder="0">
         </div>
         <div>
-          <label class="field-label">Type</label>
-          <select class="field-input" id="assetType">
-            <option value="stock">Action / ETF</option>
-            <option value="crypto">Crypto</option>
-            <option value="savings">Épargne</option>
-            <option value="esop">ESOP / PER</option>
+          <label class="field-label">Catégorie</label>
+          <select class="field-input" id="assetCat">
+            <option value="bourse">📈 Bourse / Actions</option>
+            <option value="immo">🏠 Immobilier</option>
+            <option value="crypto">🪙 Crypto</option>
+            <option value="cash">💵 Cash / Livrets</option>
+            <option value="autre">📦 Autre</option>
           </select>
-        </div>
-        <div>
-          <label class="field-label">Source</label>
-          <select class="field-input" id="assetSource">
-            <option value="manual">Manuel</option>
-            <option value="sheets">Google Sheets</option>
-            <option value="binance">Binance</option>
-            <option value="crypto">Crypto.com</option>
-            <option value="tr">Trade Republic</option>
-          </select>
-        </div>
-        <div>
-          <label class="field-label">Quantité</label>
-          <input class="field-input" type="number" id="assetQty" placeholder="0" step="any">
-        </div>
-        <div>
-          <label class="field-label">Prix d'achat moyen (€)</label>
-          <input class="field-input" type="number" id="assetBuyPrice" placeholder="0.00" step="any">
-        </div>
-        <div>
-          <label class="field-label">Prix actuel (€)</label>
-          <input class="field-input" type="number" id="assetCurrentPrice" placeholder="0.00" step="any">
-        </div>
-        <div>
-          <label class="field-label">Géographie</label>
-          <select class="field-input" id="assetGeo">
-            <option value="us">États-Unis</option>
-            <option value="eu">Europe</option>
-            <option value="fr">France</option>
-            <option value="em">Émergents</option>
-            <option value="world">Monde</option>
-            <option value="other">Autre</option>
-          </select>
-        </div>
-        <div>
-          <label class="field-label">Secteur</label>
-          <select class="field-input" id="assetSector">
-            <option value="tech">Technologie</option>
-            <option value="finance">Finance</option>
-            <option value="health">Santé</option>
-            <option value="consumer">Consommation</option>
-            <option value="energy">Énergie</option>
-            <option value="industry">Industrie</option>
-            <option value="real_estate">Immobilier</option>
-            <option value="crypto">Crypto</option>
-            <option value="mixed">Mixte / ETF</option>
-          </select>
-        </div>
-        <div>
-          <label class="field-label">Devise</label>
-          <select class="field-input" id="assetCurrency">
-            <option value="EUR">EUR</option>
-            <option value="USD">USD</option>
-            <option value="GBP">GBP</option>
-          </select>
-        </div>
-        <div>
-          <label class="field-label">Frais annuels (%)</label>
-          <input class="field-input" type="number" id="assetFees" placeholder="0.20" step="0.01">
         </div>
       </div>
       <div style="margin-top:20px; display:flex; gap:8px; justify-content:flex-end;">
         <button class="btn btn-ghost" onclick="closeModal('addAsset')">Annuler</button>
-        <button class="btn btn-accent" onclick="addAsset()">Ajouter</button>
+        <button class="btn btn-accent" onclick="addAsset()">Ajouter l'actif</button>
       </div>
     </div>
   </div>
 
-  <div class="modal-overlay" id="modal-addSavings">
-    <div class="modal">
-      <div class="modal-header">
-        <div class="modal-title">Ajouter un livret</div>
-        <button class="close-btn" onclick="closeModal('addSavings')">✕</button>
-      </div>
-      <div class="field-group">
-        <label class="field-label">Nom du compte</label>
-        <input class="field-input" id="savName" placeholder="Livret A, LDDS, PEL...">
-      </div>
-      <div class="form-grid">
-        <div>
-          <label class="field-label">Solde (€)</label>
-          <input class="field-input" type="number" id="savBalance" placeholder="0">
-        </div>
-        <div>
-          <label class="field-label">Taux annuel (%)</label>
-          <input class="field-input" type="number" id="savRate" placeholder="3.0" step="0.1">
-        </div>
-      </div>
-      <div style="margin-top:20px; display:flex; gap:8px; justify-content:flex-end;">
-        <button class="btn btn-ghost" onclick="closeModal('addSavings')">Annuler</button>
-        <button class="btn btn-accent" onclick="addSavings()">Ajouter</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal-overlay" id="modal-editSalary">
-    <div class="modal" style="max-width:560px;">
-      <div class="modal-header">
-        <div class="modal-title">Informations salariales & aides</div>
-        <button class="close-btn" onclick="closeModal('editSalary')">✕</button>
-      </div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:14px;padding:8px 12px;background:rgba(59,130,246,0.05);border-radius:8px;border:1px solid rgba(59,130,246,0.08);">
-        💡 Airbus : salaire net ≈ brut × 0.77 (charges ~23%). Intéressement/participation disponibles via votre espace RH.
-      </div>
-      <div class="form-grid">
-        <div>
-          <label class="field-label">Salaire brut mensuel (€)</label>
-          <input class="field-input" type="number" id="salGross" placeholder="3000" oninput="estimateNet()">
-        </div>
-        <div>
-          <label class="field-label">Salaire net mensuel (€)</label>
-          <input class="field-input" type="number" id="salNet" placeholder="2400">
-          <div class="text-xs color-muted mt-8" id="netEstimate" style="margin-top:4px;"></div>
-        </div>
-        <div>
-          <label class="field-label">Intéressement annuel (€)</label>
-          <input class="field-input" type="number" id="salInter" placeholder="0">
-        </div>
-        <div>
-          <label class="field-label">Participation annuelle (€)</label>
-          <input class="field-input" type="number" id="salPart" placeholder="0">
-        </div>
-        <div>
-          <label class="field-label">Épargne mensuelle (€)</label>
-          <input class="field-input" type="number" id="salSaved" placeholder="500">
-        </div>
-        <div>
-          <label class="field-label">Abondement Airbus / mois (€)</label>
-          <input class="field-input" type="number" id="salAbond" placeholder="0">
-        </div>
-      </div>
-      <!-- Aides sociales -->
-      <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border);">
-        <div class="text-sm fw-bold" style="margin-bottom:10px;">🏛️ Aides & revenus complémentaires</div>
-        <div class="form-grid">
-          <div>
-            <label class="field-label">APL / aide logement (€/mois)</label>
-            <input class="field-input" type="number" id="salApl" placeholder="0">
-          </div>
-          <div>
-            <label class="field-label">Allocations CAF (€/mois)</label>
-            <input class="field-input" type="number" id="salCaf" placeholder="0">
-          </div>
-          <div>
-            <label class="field-label">Prime transport (€/mois)</label>
-            <input class="field-input" type="number" id="salTransport" placeholder="0">
-          </div>
-          <div>
-            <label class="field-label">Tickets restaurant (€/mois)</label>
-            <input class="field-input" type="number" id="salTr" placeholder="0">
-          </div>
-          <div>
-            <label class="field-label">Autre revenu (€/mois)</label>
-            <input class="field-input" type="number" id="salOther" placeholder="0">
-          </div>
-        </div>
-      </div>
-      <div style="margin-top:20px; display:flex; gap:8px; justify-content:flex-end;">
-        <button class="btn btn-ghost" onclick="closeModal('editSalary')">Annuler</button>
-        <button class="btn btn-accent" onclick="saveSalary()">Enregistrer</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal-overlay" id="modal-addExpense">
-    <div class="modal">
-      <div class="modal-header">
-        <div class="modal-title">Ajouter une dépense fixe</div>
-        <button class="close-btn" onclick="closeModal('addExpense')">✕</button>
-      </div>
-      <div class="field-group">
+  <div class="modal-overlay" id="modalAddExpense" onclick="closeModal('addExpense')">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-title">Nouvelle dépense récurrente</div>
+      <div class="fg">
         <label class="field-label">Libellé</label>
         <input class="field-input" id="expLabel" placeholder="Loyer, assurance, transport...">
       </div>
@@ -2752,15 +454,34 @@
     </div>
   </div>
 
-  <!-- Supabase SDK -->
-  <!-- Anti-FOUC : appliquer le thème avant le rendu -->
   <script>
+    // Appliquer le thème immédiatement avant le chargement du reste
     (function(){
       var t = localStorage.getItem('patrimonia_theme') || 'dark';
       document.documentElement.setAttribute('data-theme', t);
     })();
   </script>
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="app.js?v=4"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <script src="app.js"></script>
+
+  <script>
+    // Initialisation forcée au chargement du DOM
+    document.addEventListener('DOMContentLoaded', () => {
+      if (typeof initApp === 'function') {
+        initApp();
+      } else {
+        console.error("La fonction initApp() n'est pas définie dans app.js");
+      }
+    });
+
+    // Fonctions UI de base (Toggle menu mobile, etc.)
+    function toggleSidebar() {
+      document.getElementById('sidebar').classList.toggle('open');
+    }
+  </script>
+
 </body>
 </html>
