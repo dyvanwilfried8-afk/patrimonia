@@ -72,7 +72,7 @@
       font-family: 'Aptos', 'Inter', sans-serif;
       background: var(--bg);
       color: var(--text);
-      overflow: hidden; /* Sidebar + Main scroll indépendant */
+      overflow: hidden; 
       display: flex;
       height: 100vh;
     }
@@ -190,8 +190,8 @@
     .price { font-family: 'Inter', monospace; font-weight: 500; }
 
     /* Sections */
-    .section { display: none; animation: fadeIn 0.3s ease; }
-    .section.active { display: block; }
+    .page-section { display: none; animation: fadeIn 0.3s ease; }
+    .page-section.active { display: block; }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
     /* Chart Containers */
@@ -237,15 +237,15 @@
     <nav class="nav">
       <div class="nav-group">
         <div class="nav-label">Général</div>
-        <a class="nav-item active" onclick="showSec('overview')">
+        <a class="nav-item active" onclick="navigate('overview')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
           Vue d'ensemble
         </a>
-        <a class="nav-item" onclick="showSec('assets')">
+        <a class="nav-item" onclick="navigate('portfolio')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
           Patrimoine & Actifs
         </a>
-        <a class="nav-item" onclick="showSec('budget')">
+        <a class="nav-item" onclick="navigate('salary')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 12V8H6a2 2 0 0 1-2-2c0-1.1.9-2 2-2h12v4"/><path d="M4 6v12c0 1.1.9 2 2 2h14v-4"/><path d="M18 12a2 2 0 0 0-2 2c0 1.1.9 2 2 2h4v-4h-4z"/></svg>
           Dépenses & Budget
         </a>
@@ -253,11 +253,11 @@
 
       <div class="nav-group">
         <div class="nav-label">Outils</div>
-        <a class="nav-item" onclick="showSec('market')">
+        <a class="nav-item" onclick="navigate('market')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
           Marchés (Live)
         </a>
-        <a class="nav-item" onclick="showSec('credit')">
+        <a class="nav-item" onclick="navigate('credit')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
           Simulateur Crédit
         </a>
@@ -287,21 +287,21 @@
 
     <div class="content">
       
-      <section id="overview" class="section active">
+      <section id="page-overview" class="page-section active">
         <div class="dashboard-grid">
           <div class="kpi">
             <div class="kpi-label">Patrimoine Net</div>
-            <div class="kpi-val" id="totalWealth">0 €</div>
+            <div class="kpi-val" id="kpi-total">0 €</div>
             <div class="kpi-change up">▲ 2.4% <span style="color:var(--muted)">ce mois</span></div>
           </div>
           <div class="kpi">
             <div class="kpi-label">Cash & Liquidités</div>
-            <div class="kpi-val" id="totalCash">0 €</div>
+            <div class="kpi-val" id="kpi-cash">0 €</div>
             <div class="kpi-change up">▲ 1.2%</div>
           </div>
           <div class="kpi">
             <div class="kpi-label">Épargne Mensuelle</div>
-            <div class="kpi-val" id="monthlySavings">0 €</div>
+            <div class="kpi-val" id="kpi-savings">0 €</div>
             <div class="kpi-change down">▼ 0.5%</div>
           </div>
         </div>
@@ -310,19 +310,19 @@
           <div class="card">
             <div class="card-header"><span class="card-title">Évolution du Patrimoine</span></div>
             <div class="card-body">
-              <div class="chart-box"><canvas id="wealthChart"></canvas></div>
+              <div class="chart-box"><canvas id="chartHistorique"></canvas></div>
             </div>
           </div>
           <div class="card">
             <div class="card-header"><span class="card-title">Répartition</span></div>
             <div class="card-body">
-              <div class="chart-box"><canvas id="allocationChart"></canvas></div>
+              <div class="chart-box"><canvas id="chartAllocation"></canvas></div>
             </div>
           </div>
         </div>
       </section>
 
-      <section id="assets" class="section">
+      <section id="page-portfolio" class="page-section">
         <div class="card">
           <div class="card-header">
             <span class="card-title">Mes Actifs</span>
@@ -337,7 +337,7 @@
         </div>
       </section>
 
-      <section id="budget" class="section">
+      <section id="page-salary" class="page-section">
         <div class="dashboard-grid">
           <div class="kpi">
             <div class="kpi-label">Revenus fixes</div>
@@ -366,11 +366,11 @@
         </div>
       </section>
 
-      <section id="market" class="section">
+      <section id="page-market" class="page-section">
         <div class="dashboard-grid" id="marketGrid"></div>
       </section>
 
-      <section id="credit" class="section">
+      <section id="page-credit" class="page-section">
         <div class="card" style="max-width:800px; margin:0 auto;">
           <div class="card-header"><span class="card-title">Simulateur de Prêt Immobilier</span></div>
           <div class="card-body">
@@ -455,7 +455,6 @@
   </div>
 
   <script>
-    // Appliquer le thème immédiatement avant le chargement du reste
     (function(){
       var t = localStorage.getItem('patrimonia_theme') || 'dark';
       document.documentElement.setAttribute('data-theme', t);
@@ -468,7 +467,6 @@
   <script src="app.js"></script>
 
   <script>
-    // Initialisation forcée au chargement du DOM
     document.addEventListener('DOMContentLoaded', () => {
       if (typeof initApp === 'function') {
         initApp();
@@ -477,7 +475,6 @@
       }
     });
 
-    // Fonctions UI de base (Toggle menu mobile, etc.)
     function toggleSidebar() {
       document.getElementById('sidebar').classList.toggle('open');
     }
