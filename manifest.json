@@ -1,0 +1,14 @@
+{
+  "name": "Patrimonia",
+  "short_name": "Patrimonia",
+  "description": "Suivi de patrimoine personnel — actions, crypto, épargne, fiscalité",
+  "start_url": "/index.html",
+  "display": "standalone",
+  "background_color": "#060810",
+  "theme_color": "#3b82f6",
+  "orientation": "any",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ],
+  "categories": ["finance", "productivity"]
+}
