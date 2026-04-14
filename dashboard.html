@@ -15,52 +15,103 @@
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <style>
+    /* Aptos — police système Windows 11, fallback propre */
+    @font-face {
+      font-family: 'Aptos';
+      src: local('Aptos'), local('Aptos-Regular');
+      font-weight: 400;
+    }
+    @font-face {
+      font-family: 'Aptos';
+      src: local('Aptos Medium'), local('Aptos-Medium');
+      font-weight: 500;
+    }
+    @font-face {
+      font-family: 'Aptos';
+      src: local('Aptos SemiBold'), local('Aptos-SemiBold');
+      font-weight: 600;
+    }
+  </style>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+    /* ══ DARK MODE (défaut) ══ */
     :root {
       --bg:       #0b0b0f;
       --surface:  #111116;
       --surface2: #18181f;
       --surface3: #1f1f28;
-      --border:   rgba(255,255,255,0.06);
-      --border2:  rgba(255,255,255,0.10);
+      --border:   rgba(255,255,255,0.07);
+      --border2:  rgba(255,255,255,0.13);
       --accent:   #8b5cf6;
       --accent2:  #a78bfa;
+      --accent3:  #c4b5fd;
       --green:    #22c55e;
-      --text: #f0f2f5;
+      --text:     #f0f2f5;
+      --text2:    #c8d0dc;
       --muted:    #52525b;
       --muted2:   #71717a;
-      --red:      #ef4444; --danger:   #ef4444;
+      --red:      #ef4444;
+      --danger:   #ef4444;
       --gold:     #f59e0b;
-      
-      
-      --sidebar: 220px;
+      --shadow:   0 1px 3px rgba(0,0,0,0.4), 0 4px 16px rgba(0,0,0,0.3);
+      --shadow-lg:0 8px 32px rgba(0,0,0,0.5);
+      --radius:   10px;
+      --sidebar:  220px;
+      --glow: rgba(37,99,235,0.10);
+    }
+
+    /* ══ LIGHT MODE ══ */
+    :root[data-theme="light"] {
+      --bg:       #f4f5f7;
+      --surface:  #ffffff;
+      --surface2: #f0f1f4;
+      --surface3: #e8eaf0;
+      --border:   rgba(0,0,0,0.08);
+      --border2:  rgba(0,0,0,0.14);
+      --accent:   #7c3aed;
+      --accent2:  #6d28d9;
+      --accent3:  #5b21b6;
+      --green:    #16a34a;
+      --text:     #111827;
+      --text2:    #374151;
+      --muted:    #9ca3af;
+      --muted2:   #6b7280;
+      --red:      #dc2626;
+      --danger:   #dc2626;
+      --gold:     #d97706;
+      --shadow:   0 1px 3px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.06);
+      --shadow-lg:0 8px 24px rgba(0,0,0,0.12);
+      --glow: rgba(37,99,235,0.04);
     }
 
     body {
-      font-family: 'Inter', sans-serif; font-weight: 400;
+      font-family: 'Aptos', 'Segoe UI', 'Inter', system-ui, sans-serif;
+      font-weight: 400;
       background: var(--bg);
       color: var(--text);
       min-height: 100vh;
       display: flex;
-      overflow-x: hidden; /* Empêche le scroll horizontal */
+      overflow-x: hidden;
       width: 100%;
+      transition: background 0.25s ease, color 0.25s ease;
     }
 
-    /* Blue ambient glow */
+    /* Ambient glow */
     body::before {
       content: '';
       position: fixed; inset: 0;
       background:
-        radial-gradient(ellipse 60% 50% at 5% 5%, rgba(37,99,235,0.1) 0%, transparent 60%),
-        radial-gradient(ellipse 40% 60% at 95% 95%, rgba(29,78,216,0.07) 0%, transparent 60%);
+        radial-gradient(ellipse 60% 50% at 5% 5%, var(--glow) 0%, transparent 60%),
+        radial-gradient(ellipse 40% 60% at 95% 95%, var(--glow) 0%, transparent 60%);
       pointer-events: none;
       z-index: 0;
+      transition: opacity 0.3s;
     }
 
-    /* Subtle blue grid */
+    /* Grid (dark only) */
     body::after {
       content: '';
       position: fixed; inset: 0;
@@ -70,149 +121,52 @@
       background-size: 50px 50px;
       pointer-events: none;
       z-index: 0;
+      opacity: 1;
+      transition: opacity 0.3s;
     }
+    :root[data-theme="light"] body::after { opacity: 0; }
 
-    /* ── SIDEBAR ── */
+    /* ── SIDEBAR (masquée — remplacée par bottom nav) ── */
     .sidebar {
-      width: var(--sidebar);
-      background: var(--surface);
-      border-right: 1px solid var(--border);
-      display: flex;
-      flex-direction: column;
-      padding: 24px 0;
-      position: fixed;
-      top: 0; left: 0; bottom: 0;
-      z-index: 100;
-      transition: transform 0.3s ease;
+      display: none; /* On cache la sidebar latérale */
     }
+    .sidebar-overlay { display: none !important; }
 
-    .sidebar-brand {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 0 20px 24px;
-      border-bottom: 1px solid var(--border);
-    }
-
-    .brand-icon {
-      width: 34px; height: 34px;
-      background: linear-gradient(135deg,#1d4ed8,#3b82f6);
-      border-radius: 8px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 16px; flex-shrink: 0;
-    }
-
-    .brand-name {
-      font-family: 'Inter', sans-serif;
-      font-weight: 600;
-      font-size: 17px;
-    }
-
-    .brand-name span {  }
-
-    nav { padding: 16px 12px; flex: 1; }
-
-    .nav-section-title {
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      color: var(--muted);
-      padding: 0 8px;
-      margin: 12px 0 6px;
-    }
-
-    .nav-item {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 9px 12px;
-      border-radius: 8px;
-      cursor: pointer;
-      transition: all 0.15s;
-      color: var(--muted2);
-      font-size: 13.5px;
-      font-weight: 500;
-      margin-bottom: 2px;
-      border: none;
-      background: none;
-      width: 100%;
-      text-align: left;
-    }
-
-    .nav-item:hover { background: var(--surface2); color: var(--text); }
-
-    .nav-item.active {
-      background: rgba(139,92,246,0.10);
-      
-    }
-
-    .nav-item .icon { font-size: 16px; width: 20px; text-align: center; }
-
-    .sidebar-footer {
-      padding: 16px 20px;
-      border-top: 1px solid var(--border);
-    }
-
-    .user-pill {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    .user-avatar {
-      width: 32px; height: 32px;
-      background: linear-gradient(135deg, var(--accent), var(--accent2));
-      border-radius: 50%;
-      display: flex; align-items: center; justify-content: center;
-      font-family: 'Inter', sans-serif;
-      font-weight: 600;
-      font-size: 13px;
-      color: #060810;
-      flex-shrink: 0;
-    }
-
-    .user-info { flex: 1; min-width: 0; }
-    .user-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .user-sub { font-size: 11px; color: var(--muted); }
-
-    .logout-btn {
-      background: none;
-      border: none;
-      color: var(--muted);
-      cursor: pointer;
-      font-size: 16px;
-      transition: color 0.2s;
-    }
-    .logout-btn:hover { color: var(--danger); }
-
-    /* ── MAIN ── */
+    /* ── MAIN — plein écran ── */
     .main {
-      margin-left: var(--sidebar);
+      margin-left: 0;
       flex: 1;
       display: flex;
       flex-direction: column;
       min-height: 100vh;
-      width: calc(100% - var(--sidebar));
-      max-width: calc(100% - var(--sidebar));
+      width: 100%;
+      max-width: 100%;
       overflow-x: hidden;
+      padding-bottom: 72px; /* espace pour la bottom nav */
     }
 
     .topbar {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 20px 32px;
+      padding: 0 20px;
       border-bottom: 1px solid var(--border);
       background: var(--surface);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
       position: sticky;
       top: 0;
       z-index: 50;
+      height: 58px;
+      box-shadow: var(--shadow);
+      transition: background 0.25s, border-color 0.25s;
     }
 
     .topbar-title {
-      font-family: 'Inter', sans-serif;
-      font-size: 20px;
-      font-weight: 600;
+      font-family: 'Aptos', 'Segoe UI', 'Inter', system-ui, sans-serif;
+      font-size: 15px;
+      font-weight: 400;
+      color: var(--muted2);
     }
 
     .topbar-right {
@@ -232,11 +186,11 @@
       border-radius: 8px;
       font-size: 12px;
       cursor: pointer;
-      font-family: 'Inter', sans-serif; font-weight: 400;
+      font-family: 'Aptos', 'Segoe UI', 'Inter', system-ui, sans-serif; font-weight: 400;
       transition: all 0.2s;
     }
 
-    .refresh-btn:hover { border-  }
+    .refresh-btn:hover { }
 
     .last-update { font-size: 11px; color: var(--muted); }
 
@@ -258,13 +212,18 @@
     .kpi-card {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 20px;
-      transition: border-color 0.2s;
+      border-radius: var(--radius);
+      padding: 20px 22px;
+      transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
       animation: fadeIn 0.4s ease both;
+      box-shadow: var(--shadow);
     }
 
-    .kpi-card:hover { border-color: var(--border2); }
+    .kpi-card:hover {
+      border-color: var(--accent);
+      box-shadow: var(--shadow-lg);
+      transform: translateY(-1px);
+    }
 
     @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     @keyframes fadeIn {
@@ -281,7 +240,7 @@
     }
 
     .kpi-value {
-      font-family: 'Inter', sans-serif;
+      font-family: 'Aptos', 'Segoe UI', 'Inter', system-ui, sans-serif;
       font-size: 24px;
       font-weight: 600;
       letter-spacing: -0.5px;
@@ -318,8 +277,10 @@
     .panel {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 20px;
+      border-radius: var(--radius);
+      padding: 20px 22px;
+      box-shadow: var(--shadow);
+      transition: background 0.25s, border-color 0.25s;
     }
 
     .panel-header {
@@ -330,7 +291,7 @@
     }
 
     .panel-title {
-      font-family: 'Inter', sans-serif;
+      font-family: 'Aptos', 'Segoe UI', 'Inter', system-ui, sans-serif;
       font-size: 14px;
       font-weight: 600;
     }
@@ -341,7 +302,7 @@
       cursor: pointer;
       border: none;
       background: none;
-      font-family: 'Inter', sans-serif; font-weight: 400;
+      font-family: 'Aptos', 'Segoe UI', 'Inter', system-ui, sans-serif; font-weight: 400;
     }
 
     /* ── CHART CONTAINERS ── */
@@ -403,20 +364,20 @@
       border-radius: 8px;
       padding: 9px 12px;
       color: var(--text);
-      font-family: 'Inter', sans-serif; font-weight: 400;
+      font-family: 'Aptos', 'Segoe UI', 'Inter', system-ui, sans-serif; font-weight: 400;
       font-size: 13px;
       outline: none;
       transition: border-color 0.2s;
     }
 
-    .field-input:focus { border- }
+    .field-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(139,92,246,0.15); }
     .field-input option { background: var(--surface2); }
 
     .btn {
       padding: 9px 18px;
       border-radius: 8px;
       border: none;
-      font-family: 'Inter', sans-serif;
+      font-family: 'Aptos', 'Segoe UI', 'Inter', system-ui, sans-serif;
       font-size: 13px;
       font-weight: 600;
       cursor: pointer;
@@ -449,7 +410,7 @@
     }
 
     .rate-circle .rate-val {
-      font-family: 'Inter', sans-serif;
+      font-family: 'Aptos', 'Segoe UI', 'Inter', system-ui, sans-serif;
       font-size: 24px;
       font-weight: 600;
       
@@ -511,7 +472,7 @@
       margin-bottom: 20px;
     }
 
-    .modal-title { font-family: 'Inter', sans-serif; font-size: 17px; font-weight: 600; }
+    .modal-title { font-family: 'Aptos', 'Segoe UI', 'Inter', system-ui, sans-serif; font-size: 17px; font-weight: 600; }
 
     .close-btn {
       background: var(--surface2);
@@ -524,23 +485,9 @@
       display: flex; align-items: center; justify-content: center;
     }
 
-    /* ── MOBILE HAMBURGER ── */
-    .hamburger {
-      display: none;
-      background: none;
-      border: none;
-      color: var(--text);
-      font-size: 20px;
-      cursor: pointer;
-    }
-
-    .sidebar-overlay {
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.5);
-      z-index: 99;
-    }
+    /* ── HAMBURGER (masqué — sidebar remplacée par bottom nav) ── */
+    .hamburger { display: none !important; }
+    .sidebar-overlay { display: none !important; }
 
     /* ── PWA / MOBILE SAFE AREAS ── */
     body {
@@ -548,41 +495,55 @@
       padding-bottom: env(safe-area-inset-bottom);
     }
 
-    /* Bottom nav for mobile PWA */
+    /* ── BOTTOM NAV — toujours visible sur tous les écrans ── */
     .mobile-nav {
-      display: none;
+      display: flex;
       position: fixed;
       bottom: 0; left: 0; right: 0;
       background: var(--surface);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
       border-top: 1px solid var(--border);
-      padding: 8px 0 calc(8px + env(safe-area-inset-bottom));
+      padding: 4px 0 calc(4px + env(safe-area-inset-bottom));
       z-index: 200;
-      justify-content: space-around;
+      gap: 0;
+      overflow-x: auto;
+      overflow-y: hidden;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+      box-shadow: 0 -1px 0 var(--border);
+      transition: background 0.25s, border-color 0.25s;
     }
+    .mobile-nav::-webkit-scrollbar { display: none; }
 
     .mobile-nav-item {
       display: flex;
       flex-direction: column;
       align-items: center;
       gap: 3px;
-      padding: 4px 8px;
-      border-radius: 8px;
+      padding: 6px 10px;
+      border-radius: 10px;
       cursor: pointer;
       font-size: 9px;
+      font-weight: 500;
+      letter-spacing: 0.3px;
       color: var(--muted);
       border: none;
       background: none;
-      transition: color 0.2s;
-      min-width: 52px;
+      transition: all 0.18s;
+      min-width: 48px;
+      flex: 1;
+      max-width: 80px;
     }
 
-    .mobile-nav-item.active {  }
-    .mobile-nav-item .mn-icon { font-size: 20px; }
+    .mobile-nav-item:hover { color: var(--text); }
 
-    @media (max-width: 900px) {
-      .mobile-nav { display: flex; }
-      .main { padding-bottom: 70px; }
+    .mobile-nav-item.active {
+      color: var(--accent2);
+      background: rgba(139,92,246,0.12);
     }
+
+    .mobile-nav-item .mn-icon { font-size: 20px; line-height: 1; }
 
     /* Splash screen */
     .splash {
@@ -595,14 +556,11 @@
     }
     .splash.hidden { opacity: 0; pointer-events: none; }
     .splash-logo { font-size: 60px; margin-bottom: 16px; }
-    .splash-name { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 600; color: var(--text); }
+    .splash-name { font-family: 'Aptos', 'Segoe UI', 'Inter', system-ui, sans-serif; font-size: 24px; font-weight: 600; color: var(--text); }
     .splash-name span {  }
     .splash-sub { color: var(--muted); font-size: 13px; margin-top: 6px; }
-      .sidebar { transform: translateX(-100%); }
-      .sidebar.open { transform: translateX(0); }
-      .sidebar-overlay.open { display: block; }
-      .main { margin-left: 0; }
-      .hamburger { display: block; }
+
+    @media (max-width: 900px) {
       .grid-2, .grid-3, .grid-13, .grid-31 { grid-template-columns: 1fr; }
       .kpi-grid { grid-template-columns: 1fr 1fr; }
       .content { padding: 20px 16px; }
@@ -622,16 +580,16 @@
       background: var(--surface2);
       color: var(--muted);
       font-size: 11px;
-      font-family: 'Inter', sans-serif;
+      font-family: 'Aptos', 'Segoe UI', 'Inter', system-ui, sans-serif;
       font-weight: 400;
       cursor: pointer;
       transition: all 0.15s;
       white-space: nowrap;
     }
-    .sort-btn:hover { border- color: var(--accent2); }
+    .sort-btn:hover { border-color: var(--accent2); color: var(--text); }
     .sort-btn.active {
-      background: rgba(59,130,246,0.15);
-      border-
+      background: rgba(139,92,246,0.15);
+      border-color: var(--accent2);
       color: var(--accent2);
       font-weight: 500;
     }
@@ -648,15 +606,15 @@
       color: var(--muted);
       font-size: 12px;
       font-weight: 400;
-      font-family: 'Inter', sans-serif;
+      font-family: 'Aptos', 'Segoe UI', 'Inter', system-ui, sans-serif;
       cursor: pointer;
       transition: all 0.2s;
       letter-spacing: 0.3px;
     }
-    .period-btn:hover { border- color: var(--accent2); }
+    .period-btn:hover { border-color: var(--accent2); color: var(--text); }
     .period-btn.active, .period-btn.active-default {
-      background: rgba(59,130,246,0.15);
-      border-
+      background: rgba(139,92,246,0.15);
+      border-color: var(--accent2);
       color: var(--accent2);
       font-weight: 500;
     }
@@ -683,7 +641,7 @@
       color: var(--muted2);
       font-size: 13px;
       font-weight: 400;
-      font-family: 'Inter', sans-serif;
+      font-family: 'Aptos', 'Segoe UI', 'Inter', system-ui, sans-serif;
       cursor: pointer;
       transition: all 0.15s;
     }
@@ -719,15 +677,17 @@
     /* ── NOTIFICATIONS ── */
     .toast {
       position: fixed;
-      bottom: 24px; right: 24px;
-      background: var(--surface2);
+      bottom: 84px; right: 20px;
+      background: var(--surface);
       border: 1px solid var(--border2);
-      border-radius: 8px;
-      padding: 12px 16px;
+      border-radius: 10px;
+      padding: 12px 18px;
       font-size: 13px;
+      font-weight: 500;
       z-index: 1000;
-      animation: slideIn 0.3s ease;
-      max-width: 280px;
+      animation: slideIn 0.3s cubic-bezier(.22,.68,0,1.2);
+      max-width: 300px;
+      box-shadow: var(--shadow-lg);
     }
 
     @keyframes slideIn {
@@ -754,7 +714,7 @@
 
     /* Section title */
     .section-title {
-      font-family: 'Inter', sans-serif;
+      font-family: 'Aptos', 'Segoe UI', 'Inter', system-ui, sans-serif;
       font-size: 20px;
       font-weight: 600;
       margin-bottom: 6px;
@@ -765,18 +725,90 @@
     .highlight-card {
       background: linear-gradient(135deg, rgba(59,130,246,0.06), rgba(90,242,200,0.04));
       border: 1px solid rgba(59,130,246,0.18);
-      border-radius: 8px;
+      border-radius: var(--radius);
       padding: 20px;
       margin-bottom: 16px;
     }
+
+    /* ── THEME TOGGLE ── */
+    #themeToggle:hover { border-color: var(--accent); }
+
+    /* ── TABLES LIGHT MODE ── */
+    .data-table td { transition: background 0.25s; }
+    :root[data-theme="light"] .data-table tr:hover td { background: var(--surface2); }
+    :root[data-theme="light"] .data-table th { color: var(--muted2); }
+
+    /* ── CAT-CARDS LIGHT ── */
+    :root[data-theme="light"] .cat-card { border-bottom: 1px solid var(--border); }
+
+    /* ── MODAL LIGHT ── */
+    :root[data-theme="light"] .modal {
+      background: var(--surface);
+      border-color: var(--border2);
+      box-shadow: var(--shadow-lg);
+    }
+    :root[data-theme="light"] .modal-overlay { background: rgba(0,0,0,0.4); }
+
+    /* ── BADGE light ── */
+    :root[data-theme="light"] .badge-up { background: rgba(22,163,74,0.12); color: #16a34a; }
+    :root[data-theme="light"] .badge-down { background: rgba(220,38,38,0.12); color: #dc2626; }
+    :root[data-theme="light"] .badge-neutral { background: rgba(107,114,128,0.15); }
+
+    /* ── KPI LABEL ── */
+    :root[data-theme="light"] .kpi-label { color: var(--muted2); }
+
+    /* ── PROGRESS BAR light ── */
+    :root[data-theme="light"] .progress-bar { background: var(--surface3); }
+
+    /* ── SECTION TITLES ── */
+    .section-title { font-size: 22px; font-weight: 600; letter-spacing: -0.4px; margin-bottom: 6px; }
+    .section-sub { color: var(--muted2); font-size: 13.5px; margin-bottom: 24px; }
+
+    /* ── CONTENT PADDING ── */
+    .content { padding: 24px 28px; }
+
+    /* ── BOTTOM NAV ACTIVE ── */
+    .mobile-nav-item.active {
+      color: var(--accent);
+      background: rgba(139,92,246,0.10);
+    }
+    :root[data-theme="light"] .mobile-nav-item.active {
+      color: var(--accent2);
+      background: rgba(109,40,217,0.08);
+    }
+
+    /* ── THEME BUTTONS in settings ── */
+    #btnDark.active-theme, #btnLight.active-theme {
+      border-color: var(--accent);
+      background: rgba(139,92,246,0.12);
+      color: var(--accent);
+    }
+
+    /* ── SCROLLBAR ── */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+    /* ── REFRESH BTN ── */
+    .refresh-btn:hover { border-color: var(--accent); color: var(--text); }
+
+    /* ── PANEL HEADER ── */
+    .panel-title { font-size: 14px; font-weight: 600; letter-spacing: -0.1px; }
+    .panel-action { color: var(--accent2); }
+    .panel-action:hover { color: var(--accent); }
+
+    /* ── EMPTY STATE ── */
+    :root[data-theme="light"] .empty-state { color: var(--muted2); }
+
   </style>
 </head>
 <body>
   <!-- Sidebar overlay for mobile -->
   <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
 
-  <!-- ── SIDEBAR ── -->
-  <aside class="sidebar" id="sidebar">
+  <!-- ── SIDEBAR (masquée, remplacée par bottom nav) ── -->
+  <aside class="sidebar" id="sidebar" style="display:none;">
     <div class="sidebar-brand">
       <div class="brand-icon">₩</div>
       <div class="brand-name">Patrim<b>onia</b></div>
@@ -849,14 +881,29 @@
   <!-- ── MAIN ── -->
   <main class="main">
     <header class="topbar">
-      <div class="flex gap-12">
-        <button class="hamburger" onclick="toggleSidebar()">☰</button>
-        <div class="topbar-title" id="topbarTitle">Tableau de bord</div>
+      <div class="flex gap-12" style="align-items:center;">
+        <!-- Logo Patrimonia -->
+        <div style="display:flex;align-items:center;gap:8px;margin-right:4px;">
+          <div style="width:32px;height:32px;background:linear-gradient(135deg,var(--accent),#6366f1);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;">₩</div>
+          <span style="font-weight:600;font-size:16px;letter-spacing:-0.3px;">Patrim<b style="color:var(--accent2);">onia</b></span>
+        </div>
+        <div class="topbar-title" id="topbarTitle" style="font-size:15px;color:var(--muted2);font-weight:400;">Tableau de bord</div>
       </div>
       <div class="topbar-right">
-        <span class="last-update" id="lastUpdate">–</span>
-        <button class="refresh-btn" onclick="refreshData()">↻ Actualiser</button>
-        <button class="btn btn-accent" onclick="openModal('addAsset')" style="font-size:12px;padding:7px 14px;">+ Ajouter</button>
+        <span class="last-update" id="lastUpdate" style="display:none;">–</span>
+        <!-- Toggle Light/Dark -->
+        <button id="themeToggle" onclick="toggleTheme()" title="Changer le thème"
+          style="background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:5px 12px;cursor:pointer;font-size:16px;transition:all 0.2s;display:flex;align-items:center;gap:6px;color:var(--text);">
+          <span id="themeIcon">☀️</span>
+        </button>
+        <button class="refresh-btn" onclick="refreshData()" style="padding:7px 10px;" title="Actualiser">↻</button>
+        <button class="btn btn-accent" onclick="openModal('addAsset')" style="font-size:12px;padding:7px 16px;">+ Ajouter</button>
+        <!-- User pill -->
+        <div style="display:flex;align-items:center;gap:8px;padding-left:12px;border-left:1px solid var(--border);">
+          <div class="user-avatar" id="userAvatar" style="width:32px;height:32px;font-size:12px;cursor:pointer;" title="Paramètres" onclick="navigate('settings')">D</div>
+          <div style="display:none;" id="userName">Utilisateur</div>
+          <button class="logout-btn" onclick="logout()" title="Déconnexion" style="font-size:18px;color:var(--muted);padding:0 2px;background:none;border:none;cursor:pointer;transition:color 0.2s;" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--muted)'">⏏</button>
+        </div>
       </div>
     </header>
 
@@ -1038,7 +1085,7 @@
           </div>
 
           <div style="display:flex;align-items:flex-end;gap:14px;margin-bottom:16px;flex-wrap:wrap;">
-            <div id="assetChartVal" style="font-family:'Inter',sans-serif;font-size:32px;font-weight:300;">–</div>
+            <div id="assetChartVal" style="font-family:'Aptos','Segoe UI','Inter',system-ui,sans-serif;font-size:32px;font-weight:300;">–</div>
             <div id="assetChartDelta" style="padding-bottom:4px;font-size:13px;">–</div>
           </div>
 
@@ -1120,7 +1167,7 @@
         <div class="kpi-grid">
           <div class="kpi-card">
             <div class="kpi-label">Total épargne</div>
-            <div class="kpi-value color-blue" id="savingsTotal">–</div>
+            <div class="kpi-value" style="color:var(--accent2);" id="savingsTotal">–</div>
           </div>
           <div class="kpi-card">
             <div class="kpi-label">Intérêts estimés / an</div>
@@ -1956,6 +2003,19 @@
           <div class="panel">
             <div class="panel-header"><div class="panel-title">Affichage</div></div>
             <div class="field-group">
+              <label class="field-label">Thème</label>
+              <div style="display:flex;gap:8px;">
+                <button onclick="setTheme('dark')" id="btnDark"
+                  style="flex:1;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);cursor:pointer;font-size:13px;font-weight:500;transition:all 0.2s;font-family:inherit;">
+                  🌙 Sombre
+                </button>
+                <button onclick="setTheme('light')" id="btnLight"
+                  style="flex:1;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);cursor:pointer;font-size:13px;font-weight:500;transition:all 0.2s;font-family:inherit;">
+                  ☀️ Clair
+                </button>
+              </div>
+            </div>
+            <div class="field-group">
               <label class="field-label">Devise principale</label>
               <select class="field-input" id="currency">
                 <option value="EUR">EUR (€)</option>
@@ -2004,15 +2064,15 @@
         <!-- ── TABS ── -->
         <div style="display:flex;gap:2px;background:var(--surface2);border-radius:8px;padding:3px;margin-bottom:20px;width:fit-content;">
           <button id="tabMens" onclick="switchPretTab('mensualite')"
-            style="padding:7px 16px;border-radius:6px;border:none;font-family:'Inter',sans-serif;font-size:13px;font-weight:500;cursor:pointer;transition:all .15s;background:var(--accent);color:white;">
+            style="padding:7px 16px;border-radius:6px;border:none;font-family:'Aptos','Segoe UI','Inter',system-ui,sans-serif;font-size:13px;font-weight:500;cursor:pointer;transition:all .15s;background:var(--accent);color:white;">
             Mensualités
           </button>
           <button id="tabCapa" onclick="switchPretTab('capacite')"
-            style="padding:7px 16px;border-radius:6px;border:none;font-family:'Inter',sans-serif;font-size:13px;font-weight:400;cursor:pointer;transition:all .15s;background:transparent;color:var(--muted2);">
+            style="padding:7px 16px;border-radius:6px;border:none;font-family:'Aptos','Segoe UI','Inter',system-ui,sans-serif;font-size:13px;font-weight:400;cursor:pointer;transition:all .15s;background:transparent;color:var(--muted2);">
             Capacité d'emprunt
           </button>
           <button id="tabComp" onclick="switchPretTab('comparatif')"
-            style="padding:7px 16px;border-radius:6px;border:none;font-family:'Inter',sans-serif;font-size:13px;font-weight:400;cursor:pointer;transition:all .15s;background:transparent;color:var(--muted2);">
+            style="padding:7px 16px;border-radius:6px;border:none;font-family:'Aptos','Segoe UI','Inter',system-ui,sans-serif;font-size:13px;font-weight:400;cursor:pointer;transition:all .15s;background:transparent;color:var(--muted2);">
             Comparatif banques
           </button>
         </div>
@@ -2256,17 +2316,26 @@
                 <input class="field-input" type="number" id="taxAge" placeholder="30" oninput="calculateTax()">
               </div>
               <div>
-                <label class="field-label">Situation familiale</label>
+                <label class="field-label">Situation familiale / statut</label>
                 <select class="field-input" id="taxSituation" onchange="calculateTax()">
-                  <option value="single">Célibataire</option>
-                  <option value="married">Marié(e) / PACS</option>
-                  <option value="married_children1">Marié(e) + 1 enfant</option>
-                  <option value="married_children2">Marié(e) + 2 enfants</option>
-                  <option value="married_children3">Marié(e) + 3 enfants</option>
-                  <option value="single_parent1">Parent isolé + 1 enfant</option>
-                  <option value="single_parent2">Parent isolé + 2 enfants</option>
+                  <optgroup label="Situations classiques">
+                    <option value="single">Célibataire</option>
+                    <option value="married">Marié(e) / PACS</option>
+                    <option value="married_children1">Marié(e) + 1 enfant</option>
+                    <option value="married_children2">Marié(e) + 2 enfants</option>
+                    <option value="married_children3">Marié(e) + 3 enfants</option>
+                    <option value="single_parent1">Parent isolé + 1 enfant</option>
+                    <option value="single_parent2">Parent isolé + 2 enfants</option>
+                  </optgroup>
+                  <optgroup label="🎓 Statuts avec exonérations spéciales">
+                    <option value="etudiant">📚 Étudiant (job étudiant)</option>
+                    <option value="apprenti">🎓 Apprenti / alternant</option>
+                  </optgroup>
                 </select>
               </div>
+
+              <!-- Bannière exonération (affichée si étudiant/apprenti) -->
+              <div id="exonerationBanner" style="display:none;grid-column:1/-1;background:rgba(34,197,94,0.07);border:1px solid rgba(34,197,94,0.25);border-radius:10px;padding:14px 16px;"></div>
               <div>
                 <label class="field-label">Salaire brut annuel (€)</label>
                 <input class="field-input" type="number" id="taxGross" placeholder="40000" oninput="calculateTax()">
@@ -2357,6 +2426,16 @@
           </div>
         </div>
 
+        <!-- ── RÉGIMES SPÉCIAUX ÉTUDIANT / APPRENTI ── -->
+        <div id="regimesSpeciaux" style="display:none;margin-top:24px;">
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title" id="regimesTitle">🎓 Votre régime fiscal spécial</div>
+            </div>
+            <div id="regimesContent"></div>
+          </div>
+        </div>
+
         <!-- Simulateur PER -->
         <div class="panel" style="margin-top:24px;">
           <div class="panel-header"><div class="panel-title">🔮 Simulateur d'économie PER</div></div>
@@ -2377,22 +2456,46 @@
     </div><!-- /content -->
   </main>
 
-  <!-- ── BOTTOM NAV MOBILE ── -->
+  <!-- ── BOTTOM NAV (toujours visible) ── -->
   <nav class="mobile-nav">
     <button class="mobile-nav-item active" onclick="navigate('overview')" id="mn-overview">
-      <span class="mn-icon">🏠</span>Dashboard
+      <span class="mn-icon">🏠</span>Accueil
     </button>
     <button class="mobile-nav-item" onclick="navigate('portfolio')" id="mn-portfolio">
       <span class="mn-icon">📈</span>Portef.
     </button>
+    <button class="mobile-nav-item" onclick="navigate('savings')" id="mn-savings">
+      <span class="mn-icon">🏦</span>Épargne
+    </button>
+    <button class="mobile-nav-item" onclick="navigate('salary')" id="mn-salary">
+      <span class="mn-icon">💼</span>Budget
+    </button>
+    <button class="mobile-nav-item" onclick="navigate('dividends')" id="mn-dividends">
+      <span class="mn-icon">💰</span>Divid.
+    </button>
     <button class="mobile-nav-item" onclick="navigate('projection')" id="mn-projection">
       <span class="mn-icon">🚀</span>DCA
+    </button>
+    <button class="mobile-nav-item" onclick="navigate('ai')" id="mn-ai">
+      <span class="mn-icon">🤖</span>IA
     </button>
     <button class="mobile-nav-item" onclick="navigate('fiscalite')" id="mn-fiscalite">
       <span class="mn-icon">🏛️</span>Fiscalité
     </button>
+    <button class="mobile-nav-item" onclick="navigate('loan')" id="mn-loan">
+      <span class="mn-icon">🏠</span>Prêt
+    </button>
+    <button class="mobile-nav-item" onclick="navigate('fees')" id="mn-fees">
+      <span class="mn-icon">🔍</span>Frais
+    </button>
+    <button class="mobile-nav-item" onclick="navigate('analysis')" id="mn-analysis">
+      <span class="mn-icon">🌍</span>Analyse
+    </button>
     <button class="mobile-nav-item" onclick="navigate('sources')" id="mn-sources">
       <span class="mn-icon">🔗</span>Sources
+    </button>
+    <button class="mobile-nav-item" onclick="navigate('settings')" id="mn-settings">
+      <span class="mn-icon">⚙️</span>Params
     </button>
   </nav>
 
@@ -2649,6 +2752,15 @@
     </div>
   </div>
 
-  <script src="js/app.js?v=2"></script>
+  <!-- Supabase SDK -->
+  <!-- Anti-FOUC : appliquer le thème avant le rendu -->
+  <script>
+    (function(){
+      var t = localStorage.getItem('patrimonia_theme') || 'dark';
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>

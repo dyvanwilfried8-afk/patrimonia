@@ -12,8 +12,10 @@
   <link rel="apple-touch-icon" href="icon.svg" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="description" content="Patrimonia — Suivi de patrimoine personnel" />
+  <script>(function(){var t=localStorage.getItem('patrimonia_theme')||'dark';document.documentElement.setAttribute('data-theme',t);})();</script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <style>@font-face{font-family:'Aptos';src:local('Aptos'),local('Aptos-Regular')}@font-face{font-family:'Aptos';src:local('Aptos Medium'),local('Aptos-Medium');font-weight:500}@font-face{font-family:'Aptos';src:local('Aptos SemiBold'),local('Aptos-SemiBold');font-weight:600}</style>
   <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
     :root{
@@ -22,8 +24,14 @@
       --accent:#8b5cf6; --accent2:#a78bfa; --accent3:#c4b5fd;
       --text:#e8edf5; --text2:#a8b4c8; --muted:#52525b; --danger:#ef4444;
     }
+    :root[data-theme="light"]{
+      --bg:#f4f5f7; --surface:#ffffff; --surface2:#f0f1f4;
+      --border:rgba(0,0,0,0.08); --border2:rgba(0,0,0,0.14);
+      --accent:#7c3aed; --accent2:#6d28d9; --accent3:#5b21b6;
+      --text:#111827; --text2:#374151; --muted:#9ca3af; --danger:#dc2626;
+    }
     body{
-      font-family:'Inter',sans-serif; font-weight:400;
+      font-family:'Aptos','Segoe UI','Inter',sans-serif; font-weight:400;
       background:var(--bg); color:var(--text);
       min-height:100vh; display:flex; align-items:center; justify-content:center;
       overflow:hidden; position:relative;
@@ -63,13 +71,13 @@
     }
     .brand-icon svg{width:22px;height:22px;fill:none;stroke:#fff;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}
     .brand-name{
-      font-family:'Inter',sans-serif;
+      font-family:'Aptos','Segoe UI','Inter',sans-serif;
       font-size:26px; font-weight:400;
       letter-spacing:-0.3px; 
     }
     .brand-name b{font-weight:500; color:var(--accent2);}
     .brand-tag{
-      font-family:'Inter',sans-serif; font-weight:200;
+      font-family:'Aptos','Segoe UI','Inter',sans-serif; font-weight:200;
       font-size:10px; letter-spacing:5px;
        color:var(--muted);
     }
@@ -93,7 +101,7 @@
       border-radius:8px; font-size:11px; font-weight:400;
       letter-spacing:0.8px; cursor:pointer;
       transition:all .2s; color:var(--muted);
-      border:none; background:none; font-family:'Inter',sans-serif;
+      border:none; background:none; font-family:'Aptos','Segoe UI','Inter',sans-serif;
     }
     .tab.active{
       background:linear-gradient(135deg,#1e3a6e,#1d4ed8);
@@ -112,7 +120,7 @@
       width:100%; background:var(--surface2);
       border:1px solid var(--border);
       border-radius:8px; padding:12px 15px;
-      color:var(--text); font-family:'Inter',sans-serif;
+      color:var(--text); font-family:'Aptos','Segoe UI','Inter',sans-serif;
       font-size:13px; font-weight:400;
       transition:all .2s; outline:none;
     }
@@ -123,7 +131,7 @@
     .btn{
       width:100%; padding:13px;
       border-radius:8px; border:none;
-      font-family:'Inter',sans-serif;
+      font-family:'Aptos','Segoe UI','Inter',sans-serif;
       font-size:11px; font-weight:400;
       letter-spacing:2.5px; 
       cursor:pointer; transition:all .25s; margin-top:8px;
@@ -197,8 +205,8 @@
 
       <div id="loginForm">
         <div class="fg">
-          <label>Identifiant</label>
-          <input type="text" id="loginUser" placeholder="votre_pseudo" autocomplete="username"/>
+          <label>Email</label>
+          <input type="text" id="loginUser" placeholder="votre@email.com" autocomplete="email"/>
         </div>
         <div class="fg">
           <label>Mot de passe</label>
@@ -212,8 +220,8 @@
 
       <div id="registerForm" style="display:none">
         <div class="fg">
-          <label>Choisir un identifiant</label>
-          <input type="text" id="regUser" placeholder="votre_pseudo" autocomplete="username"/>
+          <label>Email</label>
+          <input type="text" id="regUser" placeholder="votre@email.com" autocomplete="email"/>
         </div>
         <div class="fg">
           <label>Mot de passe</label>
@@ -239,7 +247,21 @@
 
   </div>
 
+  <!-- Supabase SDK -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
+    // 🔧 Remplacez ces deux valeurs par celles de votre projet Supabase
+    const SUPABASE_URL  = 'https://VOTRE-PROJET.supabase.co';
+    const SUPABASE_ANON = 'VOTRE-ANON-KEY';
+
+    const { createClient } = supabase;
+    const sb = createClient(SUPABASE_URL, SUPABASE_ANON);
+
+    // Rediriger vers le dashboard si déjà connecté
+    sb.auth.getSession().then(({ data: { session } }) => {
+      if (session) window.location.href = 'dashboard.html';
+    });
+
     function switchTab(t){
       document.querySelectorAll('.tab').forEach((el,i)=>
         el.classList.toggle('active',(t==='login'&&i===0)||(t==='register'&&i===1))
@@ -247,56 +269,49 @@
       document.getElementById('loginForm').style.display=t==='login'?'':'none';
       document.getElementById('registerForm').style.display=t==='register'?'':'none';
     }
-    function hashPass(p){let h=0;for(let i=0;i<p.length;i++){h=Math.imul(31,h)+p.charCodeAt(i)|0;}return h.toString(36);}
 
-    // ── Migration : on unifie toutes les clés sous 'wv_users' ──
-    function getUsers(){
-      // Récupérer depuis wv_users ET pat_users (ancienne clé) et fusionner
-      let users = {};
-      try { users = JSON.parse(localStorage.getItem('wv_users') || '{}'); } catch(e){}
-      try {
-        const old = JSON.parse(localStorage.getItem('pat_users') || '{}');
-        Object.assign(users, old); // Fusionner les anciens comptes
-        if (Object.keys(old).length) {
-          localStorage.setItem('wv_users', JSON.stringify(users));
-          localStorage.removeItem('pat_users');
-        }
-      } catch(e){}
-      return users;
+    async function doLogin(){
+      const email = document.getElementById('loginUser').value.trim().toLowerCase();
+      const pass  = document.getElementById('loginPass').value;
+      const err   = document.getElementById('loginError');
+      err.textContent = '';
+      if(!email||!pass){ err.textContent='Remplissez tous les champs.'; return; }
+      const btn = document.querySelector('#loginForm .btn-primary');
+      btn.textContent = 'Connexion…'; btn.disabled = true;
+      const { error } = await sb.auth.signInWithPassword({ email, password: pass });
+      btn.textContent = 'Accéder →'; btn.disabled = false;
+      if(error){ err.textContent = 'Email ou mot de passe incorrect.'; return; }
+      window.location.href = 'dashboard.html';
     }
-    function doLogin(){
-      const u=document.getElementById('loginUser').value.trim().toLowerCase();
-      const p=document.getElementById('loginPass').value;
-      const err=document.getElementById('loginError');
-      if(!u||!p){err.textContent='Remplissez tous les champs.';return;}
-      const users=getUsers();
-      if(!users[u]||users[u].hash!==hashPass(p)){err.textContent='Identifiants incorrects.';return;}
-      sessionStorage.setItem('wv_user',u);
-      window.location.href='dashboard.html';
+
+    async function doRegister(){
+      const email = document.getElementById('regUser').value.trim().toLowerCase();
+      const pass  = document.getElementById('regPass').value;
+      const pass2 = document.getElementById('regPass2').value;
+      const err   = document.getElementById('registerError');
+      err.textContent = '';
+      if(!email||!pass){ err.textContent='Remplissez tous les champs.'; return; }
+      if(pass!==pass2){ err.textContent='Les mots de passe ne correspondent pas.'; return; }
+      if(pass.length<6){ err.textContent='Minimum 6 caractères.'; return; }
+      const btn = document.querySelector('#registerForm .btn-primary');
+      btn.textContent = 'Création…'; btn.disabled = true;
+      const { error } = await sb.auth.signUp({ email, password: pass });
+      btn.textContent = 'Créer mon espace →'; btn.disabled = false;
+      if(error){ err.textContent = error.message; return; }
+      // Supabase envoie un email de confirmation par défaut
+      // Si vous l'avez désactivé dans Authentication > Settings, on redirige directement
+      err.style.color = 'var(--accent2)';
+      err.textContent = 'Compte créé ! Vérifiez votre email pour confirmer.';
+      setTimeout(() => window.location.href = 'dashboard.html', 1500);
     }
-    function doRegister(){
-      const u=document.getElementById('regUser').value.trim().toLowerCase();
-      const p=document.getElementById('regPass').value;
-      const p2=document.getElementById('regPass2').value;
-      const err=document.getElementById('registerError');
-      if(!u||!p){err.textContent='Remplissez tous les champs.';return;}
-      if(p!==p2){err.textContent='Les mots de passe ne correspondent pas.';return;}
-      if(p.length<6){err.textContent='Minimum 6 caractères.';return;}
-      const users=getUsers();
-      if(users[u]){err.textContent='Ce nom est déjà pris.';return;}
-      users[u]={hash:hashPass(p),created:Date.now()};
-      localStorage.setItem('wv_users',JSON.stringify(users));
-      sessionStorage.setItem('wv_user',u);
-      window.location.href='dashboard.html';
-    }
-    if(sessionStorage.getItem('wv_user'))window.location.href='dashboard.html';
-    if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+
+    if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
     let deferredPrompt;
     window.addEventListener('beforeinstallprompt',e=>{
       e.preventDefault(); deferredPrompt=e;
       document.getElementById('installBtn').style.display='flex';
     });
-    function installApp(){if(deferredPrompt){deferredPrompt.prompt();deferredPrompt=null;}}
+    function installApp(){ if(deferredPrompt){ deferredPrompt.prompt(); deferredPrompt=null; } }
   </script>
 </body>
 </html>
