@@ -72,7 +72,7 @@
       font-family: 'Aptos', 'Inter', sans-serif;
       background: var(--bg);
       color: var(--text);
-      overflow: hidden; 
+      overflow: hidden; /* Sidebar + Main scroll indépendant */
       display: flex;
       height: 100vh;
     }
@@ -190,8 +190,8 @@
     .price { font-family: 'Inter', monospace; font-weight: 500; }
 
     /* Sections */
-    .page-section { display: none; animation: fadeIn 0.3s ease; }
-    .page-section.active { display: block; }
+    .section, .page-section { display: none; animation: fadeIn 0.3s ease; }
+    .section.active, .page-section.active { display: block; }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
     /* Chart Containers */
@@ -226,6 +226,20 @@
 </head>
 <body>
 
+  <!-- Splash screen (requis par app.js) -->
+  <div id="splash" style="position:fixed;inset:0;background:var(--bg);z-index:9999;display:flex;align-items:center;justify-content:center;transition:opacity 0.4s;">
+    <div style="text-align:center;">
+      <div style="width:40px;height:40px;background:var(--accent);border-radius:8px;margin:0 auto 12px;display:flex;align-items:center;justify-content:center;">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#fff" stroke-width="2"><polyline points="3,17 8,10 13,14 21,6"/></svg>
+      </div>
+      <div style="font-size:13px;color:var(--text2);">Chargement…</div>
+    </div>
+  </div>
+  <style>#splash.hidden{opacity:0;pointer-events:none;}</style>
+
+  <!-- Overlay sidebar mobile (requis par app.js) -->
+  <div id="sidebarOverlay" onclick="toggleSidebar(false)" style="display:none;position:fixed;inset:0;z-index:99;background:rgba(0,0,0,0.5);"></div>
+
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-header">
       <div class="logo-box">
@@ -253,11 +267,11 @@
 
       <div class="nav-group">
         <div class="nav-label">Outils</div>
-        <a class="nav-item" onclick="navigate('market')">
+        <a class="nav-item" onclick="navigate('overview')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
           Marchés (Live)
         </a>
-        <a class="nav-item" onclick="navigate('credit')">
+        <a class="nav-item" onclick="navigate('loan')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
           Simulateur Crédit
         </a>
@@ -278,7 +292,7 @@
 
   <main class="main">
     <header class="header">
-      <div class="page-title" id="pageTitle">Vue d'ensemble</div>
+      <div class="page-title" id="topbarTitle">Vue d'ensemble</div>
       <div class="actions">
         <button class="btn btn-ghost" onclick="toggleTheme()">🌓</button>
         <button class="btn btn-accent" id="mainActionBtn" onclick="openModal('addAsset')">+ Ajouter</button>
@@ -296,12 +310,12 @@
           </div>
           <div class="kpi">
             <div class="kpi-label">Cash & Liquidités</div>
-            <div class="kpi-val" id="kpi-cash">0 €</div>
+            <div class="kpi-val" id="totalCash">0 €</div>
             <div class="kpi-change up">▲ 1.2%</div>
           </div>
           <div class="kpi">
             <div class="kpi-label">Épargne Mensuelle</div>
-            <div class="kpi-val" id="kpi-savings">0 €</div>
+            <div class="kpi-val" id="monthlySavings">0 €</div>
             <div class="kpi-change down">▼ 0.5%</div>
           </div>
         </div>
@@ -370,7 +384,7 @@
         <div class="dashboard-grid" id="marketGrid"></div>
       </section>
 
-      <section id="page-credit" class="page-section">
+      <section id="page-loan" class="page-section">
         <div class="card" style="max-width:800px; margin:0 auto;">
           <div class="card-header"><span class="card-title">Simulateur de Prêt Immobilier</span></div>
           <div class="card-body">
@@ -393,7 +407,7 @@
     </div>
   </main>
 
-  <div class="modal-overlay" id="modalAddAsset" onclick="closeModal('addAsset')">
+  <div class="modal-overlay" id="modal-addAsset" onclick="closeModal('addAsset')">
     <div class="modal" onclick="event.stopPropagation()">
       <div class="modal-title">Ajouter un actif</div>
       <div class="fg">
@@ -423,7 +437,7 @@
     </div>
   </div>
 
-  <div class="modal-overlay" id="modalAddExpense" onclick="closeModal('addExpense')">
+  <div class="modal-overlay" id="modal-addExpense" onclick="closeModal('addExpense')">
     <div class="modal" onclick="event.stopPropagation()">
       <div class="modal-title">Nouvelle dépense récurrente</div>
       <div class="fg">
@@ -455,6 +469,7 @@
   </div>
 
   <script>
+    // Appliquer le thème immédiatement avant le chargement du reste
     (function(){
       var t = localStorage.getItem('patrimonia_theme') || 'dark';
       document.documentElement.setAttribute('data-theme', t);
@@ -467,6 +482,7 @@
   <script src="app.js"></script>
 
   <script>
+    // Initialisation forcée au chargement du DOM
     document.addEventListener('DOMContentLoaded', () => {
       if (typeof initApp === 'function') {
         initApp();
@@ -475,6 +491,7 @@
       }
     });
 
+    // Fonctions UI de base (Toggle menu mobile, etc.)
     function toggleSidebar() {
       document.getElementById('sidebar').classList.toggle('open');
     }
