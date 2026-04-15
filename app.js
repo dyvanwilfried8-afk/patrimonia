@@ -4,6 +4,8 @@
 // ══════════════════════════════════════════════════════════════
 
 // ── SUPABASE CONFIG ─────────────────────────────────────────
+// 🔧 Remplacez ces deux valeurs par celles de votre projet Supabase
+//    (Settings → API dans le dashboard Supabase)
 const SUPABASE_URL  = 'https://grvxurgvxwmheiollrmp.supabase.co';
 const SUPABASE_ANON = 'sb_publishable_7XITRulkeLGYMis4S02PiA_JaDeUQQE';
 
@@ -11,6 +13,7 @@ const { createClient } = supabase;
 const sb = createClient(SUPABASE_URL, SUPABASE_ANON);
 
 // ── AUTH GUARD + INIT ────────────────────────────────────────
+// Tout le démarrage est async : on attend la session avant de rendre quoi que ce soit
 let currentUser = null;
 
 async function initApp() {
@@ -18,60 +21,35 @@ async function initApp() {
   if (!session) { window.location.href = 'index.html'; return; }
   currentUser = session.user.id;
 
+  // Afficher l'email de l'utilisateur dans la sidebar si l'élément existe
   const emailEl = document.getElementById('userEmail');
   if (emailEl) emailEl.textContent = session.user.email;
 
+  // Charger toutes les données depuis Supabase, puis démarrer l'app
   await loadAllData();
-  
-  if (typeof init === 'function') init(); 
-  if (typeof hideSplash === 'function') hideSplash();
+  init(); // Initialiser l'UI (dropdowns, champs salaire, etc.)
+  hideSplash();
 }
 
-// ── LOCAL STORAGE HELPERS ────────────────────────────────────
-function getData(key, def) {
-  const v = localStorage.getItem('patri_' + key);
-  return v ? JSON.parse(v) : def;
-}
-function setData(key, val) {
-  localStorage.setItem('patri_' + key, JSON.stringify(val));
-}
-
-// ── DATA HELPERS (Supabase) ──────────────────────────────────
+// ── DATA HELPERS (localStorage + Supabase) ──────────────────
 const _cache = {};
 
-async function loadAllData() {
-  try {
-    // 1. Charger le profil (Salaire et Paramètres)
-    const { data: profile } = await sb.from('user_data').select('*').eq('user_id', currentUser).single();
-    if (profile) {
-      salary = profile.salary || { gross: 0, net: 0, inter: 0, part: 0, saved: 0 };
-      settings = profile.settings || { currency: 'EUR', exposureThreshold: 20 };
-    }
+function getData(key, def) {
+  const cached = _cache[key];
+  if (cached !== undefined) return cached;
+  const raw = localStorage.getItem('pat_' + key);
+  if (raw === null) return def;
+  try { return JSON.parse(raw); } catch { return raw; }
+}
 
-    // 2. Charger les Actifs
-    const { data: assetData } = await sb.from('assets').select('*').eq('user_id', currentUser);
-    assets = assetData || [];
-
-    // 3. Charger les Dépenses
-    const { data: expenseData } = await sb.from('expenses').select('*').eq('user_id', currentUser);
-    expenses = expenseData || [];
-
-  } catch (e) { 
-    console.error('Erreur chargement Supabase:', e); 
+function setData(key, value) {
+  _cache[key] = value;
+  localStorage.setItem('pat_' + key, JSON.stringify(value));
+  if (currentUser) {
+    sb.from('user_data').upsert({ user_id: currentUser, key, value }).catch(() => {});
   }
 }
 
-async function saveAsset(asset) {
-  await sb.from('assets').upsert({ ...asset, user_id: currentUser });
-}
-
-async function saveSalary() {
-  await sb.from('user_data').upsert({ 
-    user_id: currentUser, 
-    salary: salary, 
-    settings: settings 
-  });
-}
 
 // ══════════════════════════════════════════════════════════════
 //  THEME MANAGER — Light / Dark
@@ -85,18 +63,23 @@ function applyTheme(theme) {
 
   if (icon) icon.textContent = theme === 'light' ? '🌙' : '☀️';
 
+  // Highlight active button in settings
   if (btnDark)  btnDark.classList.toggle('active-theme',  theme === 'dark');
   if (btnLight) btnLight.classList.toggle('active-theme', theme === 'light');
 
+  // Mettre à jour Chart.js global defaults pour les couleurs des axes
   if (window.Chart) {
     const gridColor  = theme === 'light' ? 'rgba(0,0,0,0.06)'  : 'rgba(255,255,255,0.04)';
     const tickColor  = theme === 'light' ? '#9ca3af'             : '#6b7280';
     Chart.defaults.color = tickColor;
     Chart.defaults.scale.grid.color = gridColor;
+    // Redessiner tous les charts existants
     Object.values(chartInstances || {}).forEach(c => {
       try {
-        if(c.options.scales?.x) { c.options.scales.x.grid.color = gridColor; c.options.scales.x.ticks.color = tickColor; }
-        if(c.options.scales?.y) { c.options.scales.y.grid.color = gridColor; c.options.scales.y.ticks.color = tickColor; }
+        c.options.scales?.x && (c.options.scales.x.grid.color = gridColor);
+        c.options.scales?.x && (c.options.scales.x.ticks.color = tickColor);
+        c.options.scales?.y && (c.options.scales.y.grid.color = gridColor);
+        c.options.scales?.y && (c.options.scales.y.ticks.color = tickColor);
         c.update('none');
       } catch(e) {}
     });
@@ -113,10 +96,32 @@ function toggleTheme() {
   setTheme(current === 'dark' ? 'light' : 'dark');
 }
 
+// Appliquer le thème sauvegardé au chargement
 (function() {
   const saved = localStorage.getItem('patrimonia_theme') || 'dark';
   document.documentElement.setAttribute('data-theme', saved);
 })();
+
+// ── CHARGEMENT INITIAL DE TOUTES LES DONNÉES ────────────────
+async function loadAllData() {
+  // Charger toutes les clés en une seule requête pour la performance
+  try {
+    const { data, error } = await sb
+      .from('user_data')
+      .select('key, value')
+      .eq('user_id', currentUser);
+    if (!error && data) {
+      data.forEach(row => { _cache[row.key] = row.value; });
+    }
+  } catch (e) { console.error('loadAllData error', e); }
+
+  assets   = _cache['assets']   ?? [];
+  savings  = _cache['savings']  ?? [];
+  salary   = _cache['salary']   ?? { gross: 0, net: 0, inter: 0, part: 0, saved: 0 };
+  expenses = _cache['expenses'] ?? [];
+  settings = _cache['settings'] ?? { currency: 'EUR', exposureThreshold: 20 };
+  sources  = _cache['sources']  ?? {};
+}
 
 // ── STATE ─────────────────────────────────────────────────────
 let assets    = [];
@@ -126,8 +131,6 @@ let expenses  = [];
 let settings  = { currency: 'EUR', exposureThreshold: 20 };
 let sources   = {};
 let chartInstances = {};
-
-// ── CHART HELPERS ─────────────────────────────────────────────
 
 // ── CHART HELPERS ─────────────────────────────────────────────
 const CHART_COLORS = [
@@ -994,7 +997,7 @@ function getAssetInitial(name, type) {
   const bg  = cols[type]||cols.stock;
   const col = txts[type]||txts.stock;
   const ini = (name||'?').trim().split(/\s+/).slice(0,2).map(w=>w[0]?.toUpperCase()||'').join('');
-  return \`<div style="width:32px;height:32px;border-radius:50%;flex-shrink:0;background:\${bg};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:\${col};">\${ini||'?'}</div>\`;
+  return `<div style="width:32px;height:32px;border-radius:50%;flex-shrink:0;background:${bg};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:${col};">${ini||'?'}</div>`;
 }
 
 // ── SORT STATE ────────────────────────────────────────────────
@@ -2838,7 +2841,7 @@ function renderOptimisations({ gross, grossImposable = gross, exonerationMontant
       priority: 'high'
     });
     opts.push({
-      icon: '🏦', titre: 'Livret A & LDDS — 0% d'impôt',
+      icon: '🏦', titre: "Livret A & LDDS — 0% d'impôt",
       desc: `Intérêts totalement exonérés d'IR et de PS. Livret A : 22 950€ · LDDS : 12 000€ · Taux 2024 : <b>2.40% net</b>.`,
       gain: `Idéal pour épargne de précaution · Disponible à tout moment`,
       priority: 'high'
