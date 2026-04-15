@@ -15,6 +15,9 @@
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <!-- Supabase CDN (REQUIS avant app.js) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -2077,10 +2080,12 @@
 
   
   <script>
-    // Unregister any broken service worker caches
+    // Service Worker : désenregistre l'ancien cache cassé puis réenregistre
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.getRegistrations().then(regs => {
         regs.forEach(reg => reg.unregister());
+      }).then(() => {
+        navigator.serviceWorker.register('sw.js').catch(() => {});
       });
     }
   </script>
