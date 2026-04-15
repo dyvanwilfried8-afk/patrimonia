@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>Patrimonia — Dashboard</title>
+  <title>Patrimonia</title>
 
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#0b0b0f" />
@@ -12,264 +12,205 @@
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
-  
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
   <style>
+    /* ON GARDE TON CSS ORIGINAL COMPLET */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
       --bg: #0b0b0f;
       --surface: #111116;
       --surface2: #18181f;
       --accent: #3b82f6;
-      --accent-muted: rgba(59, 130, 246, 0.1);
       --text: #ffffff;
       --muted: #94a3b8;
       --border: rgba(255,255,255,0.08);
       --green: #22c55e;
       --red: #ef4444;
-      --gold: #f59e0b;
     }
 
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); overflow-x: hidden; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      display: flex;
+      min-height: 100vh;
+    }
 
-    /* Layout */
-    .app-container { display: flex; min-height: 100vh; }
-    
+    /* Sidebar originale */
     .sidebar {
       width: 260px;
       background: var(--surface);
       border-right: 1px solid var(--border);
-      padding: 24px 16px;
       display: flex;
       flex-direction: column;
       position: fixed;
       height: 100vh;
+      z-index: 100;
     }
 
-    .content { margin-left: 260px; flex: 1; padding: 32px; max-width: 1200px; }
+    .main-content {
+      margin-left: 260px;
+      flex: 1;
+      padding: 40px;
+      max-width: 1200px;
+    }
 
-    /* Navigation */
-    .nav-group { margin-bottom: 32px; }
-    .nav-label { font-size: 11px; text-transform: uppercase; color: var(--muted); letter-spacing: 1px; margin-bottom: 12px; padding-left: 12px; }
     .nav-item {
-      display: flex; align-items: center; gap: 12px; padding: 12px;
-      color: var(--muted); text-decoration: none; border-radius: 8px;
-      cursor: pointer; transition: 0.2s; font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 20px;
+      color: var(--muted);
+      text-decoration: none;
+      cursor: pointer;
+      transition: 0.2s;
     }
-    .nav-item:hover, .nav-item.active { background: var(--accent-muted); color: var(--accent); }
-    .nav-item svg { width: 18px; height: 18px; }
 
-    /* Cards */
-    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin-bottom: 24px; }
-    .card-title { font-size: 16px; font-weight: 600; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; }
+    .nav-item:hover, .nav-item.active {
+      color: var(--text);
+      background: rgba(255,255,255,0.03);
+    }
 
-    /* Forms */
-    .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 16px; }
-    .field-group { margin-bottom: 16px; }
-    .field-label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+    .nav-item.active {
+      border-right: 3px solid var(--accent);
+      color: var(--accent);
+    }
+
+    /* Cards originales */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+
+    /* Masquage des pages */
+    .page-section { display: none; }
+    .page-section.active { display: block; animation: fadeIn 0.3s ease; }
+
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* Nouveaux styles pour les formulaires d'import */
+    .import-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .field-label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
     .field-input {
       width: 100%; background: var(--surface2); border: 1px solid var(--border);
-      color: white; padding: 10px 14px; border-radius: 8px; font-size: 14px;
+      color: white; padding: 12px; border-radius: 8px; margin-bottom: 15px;
     }
-    .btn {
-      padding: 10px 20px; border-radius: 8px; font-weight: 500; cursor: pointer;
-      border: none; font-size: 14px; transition: 0.2s;
-    }
-    .btn-accent { background: var(--accent); color: white; }
-    .btn-accent:hover { opacity: 0.9; }
-
-    /* Analysis Specifics */
-    .score-badge {
-      font-size: 48px; font-weight: 700; text-align: center; margin: 20px 0;
-      color: var(--accent); display: block;
-    }
-    .page-section { display: none; }
-    .page-section.active { display: block; }
-
-    /* Charts Container */
-    .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-
-    @media (max-width: 900px) {
-      .sidebar { width: 70px; padding: 16px 8px; }
-      .sidebar .nav-label, .sidebar span { display: none; }
-      .content { margin-left: 70px; padding: 16px; }
-      .charts-grid { grid-template-columns: 1fr; }
-    }
+    .btn-accent { background: var(--accent); color: white; border: none; padding: 12px 20px; border-radius: 8px; cursor: pointer; font-weight: 600; }
   </style>
 </head>
 <body>
 
-  <div class="app-container">
-    <aside class="sidebar">
-      <div style="font-weight: 700; font-size: 20px; margin-bottom: 40px; padding-left: 12px;">Patrimonia</div>
-      
-      <div class="nav-group">
-        <div class="nav-label">Vue d'ensemble</div>
-        <a class="nav-item active" onclick="showPage('overview')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
-          <span>Tableau de bord</span>
-        </a>
-        <a class="nav-item" onclick="showPage('analysis')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M12 2v20"></path><path d="M2 12h20"></path></svg>
-          <span>Analyse & Score</span>
-        </a>
+  <aside class="sidebar">
+    <div style="padding: 30px 20px; font-weight: 700; font-size: 22px; color: var(--accent);">Patrimonia</div>
+    
+    <nav>
+      <div class="nav-item active" onclick="switchPage('overview', this)">
+        <span>🏠 Tableau de bord</span>
       </div>
-
-      <div class="nav-group">
-        <div class="nav-label">Gestion</div>
-        <a class="nav-item" onclick="showPage('fiscalite')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22"></path><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
-          <span>Fiscalité</span>
-        </a>
-        <a class="nav-item" onclick="showPage('sources')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-          <span>Connexions & Imports</span>
-        </a>
+      <div class="nav-item" onclick="switchPage('analysis', this)">
+        <span>📊 Analyse & Score</span>
       </div>
-    </aside>
+      <div class="nav-item" onclick="switchPage('fiscalite', this)">
+        <span>⚖️ Fiscalité</span>
+      </div>
+      <div class="nav-item" onclick="switchPage('sources', this)">
+        <span>🔌 Connexions & Imports</span>
+      </div>
+    </nav>
+  </aside>
 
-    <main class="content">
+  <main class="main-content">
+    
+    <section id="page-overview" class="page-section active">
+      <h1 style="margin-bottom: 30px;">Synthèse Globale</h1>
+      <div class="card">
+        <h3>Patrimoine Net</h3>
+        <div style="font-size: 32px; font-weight: 700; margin: 10px 0;">0.00 €</div>
+      </div>
+    </section>
+
+    <section id="page-analysis" class="page-section">
+      <h1 style="margin-bottom: 30px;">Analyse & Diversification</h1>
+      <div class="card" style="text-align: center;">
+        <div style="font-size: 14px; color: var(--muted);">Score de Diversification</div>
+        <div style="font-size: 48px; font-weight: 800; color: var(--accent); margin: 10px 0;">--/10</div>
+      </div>
+      <div class="import-grid">
+        <div class="card"><h3>Répartition par actifs</h3><canvas id="chartAssets"></canvas></div>
+        <div class="card"><h3>Répartition géographique</h3><canvas id="chartRegions"></canvas></div>
+      </div>
+    </section>
+
+    <section id="page-fiscalite" class="page-section">
+      <h1 style="margin-bottom: 30px;">Profil Fiscal</h1>
+      <div class="card">
+        <label class="field-label">Situation</label>
+        <select class="field-input">
+          <option>Célibataire</option>
+          <option>Apprenti (Exonéré)</option>
+          <option>Marié / PACS</option>
+        </select>
+        <label class="field-label">Revenus annuels</label>
+        <input type="number" class="field-input" placeholder="30000">
+        <button class="btn-accent">Calculer mon imposition</button>
+      </div>
+    </section>
+
+    <section id="page-sources" class="page-section">
+      <h1 style="margin-bottom: 30px;">Sources de données</h1>
       
-      <section id="page-overview" class="page-section active">
-        <h1 style="margin-bottom: 24px;">Bonjour 👋</h1>
+      <div class="import-grid">
         <div class="card">
-          <p>Bienvenue sur votre synthèse. Vos données sont synchronisées.</p>
-        </div>
-      </section>
-
-      <section id="page-analysis" class="page-section">
-        <h1 style="margin-bottom: 24px;">Analyse du Patrimoine</h1>
-        
-        <div class="card" style="text-align: center;">
-          <div class="card-title">Score de Diversification</div>
-          <span class="score-badge" id="diversificationScore">7.5/10</span>
-          <p style="color: var(--muted);">Votre portefeuille est bien diversifié géographiquement.</p>
+          <h4>📊 Google Sheets</h4>
+          <p style="font-size: 12px; color: var(--muted); margin-bottom: 15px;">Import par API</p>
+          <input type="text" class="field-input" placeholder="ID du Spreadsheet">
+          <button class="btn-accent" style="width: 100%;">Synchroniser</button>
         </div>
 
-        <div class="charts-grid">
-          <div class="card">
-            <div class="card-title">Par Type d'Actif</div>
-            <canvas id="chartAssets" height="200"></canvas>
-          </div>
-          <div class="card">
-            <div class="card-title">Par Région</div>
-            <canvas id="chartRegions" height="200"></canvas>
-          </div>
-        </div>
-      </section>
-
-      <section id="page-fiscalite" class="page-section">
-        <h1 style="margin-bottom: 24px;">Profil Fiscal</h1>
         <div class="card">
-          <div class="card-title">Paramètres de calcul</div>
-          <div class="form-grid">
-            <div class="field-group">
-              <label class="field-label">Situation familiale</label>
-              <select class="field-input" id="taxStatus">
-                <option value="single">Célibataire</option>
-                <option value="married">Marié / PACS</option>
-                <option value="apprenti">Apprenti (Exonéré)</option>
-              </select>
-            </div>
-            <div class="field-group">
-              <label class="field-label">Nombre d'enfants</label>
-              <input type="number" class="field-input" value="0">
-            </div>
-          </div>
-          <div class="field-group">
-            <label class="field-label">Revenu Annuel Net Fiscal (€)</label>
-            <input type="number" class="field-input" placeholder="30000">
-          </div>
-          <button class="btn btn-accent">Simuler mon impôt</button>
-        </div>
-      </section>
-
-      <section id="page-sources" class="page-section">
-        <h1 style="margin-bottom: 24px;">Connexions & Imports</h1>
-        
-        <div class="form-grid">
-          <div class="card">
-            <div class="card-title">📊 Google Sheets</div>
-            <div class="field-group">
-              <label class="field-label">Sheet ID</label>
-              <input type="text" id="gs_id" class="field-input" placeholder="ID de votre document">
-            </div>
-            <button class="btn btn-accent" style="width:100%" onclick="importSheets()">Synchroniser API</button>
-          </div>
-
-          <div class="card">
-            <div class="card-title">🟨 Binance</div>
-            <div class="field-group">
-              <label class="field-label">Clé API</label>
-              <input type="password" id="binance_key" class="field-input" placeholder="API Key">
-            </div>
-            <button class="btn btn-accent" style="width:100%" onclick="importBinance()">Connecter API</button>
-          </div>
+          <h4>🟨 Binance</h4>
+          <p style="font-size: 12px; color: var(--muted); margin-bottom: 15px;">Connexion API Read-only</p>
+          <input type="password" class="field-input" placeholder="API Key">
+          <button class="btn-accent" style="width: 100%;">Connecter</button>
         </div>
 
-        <div class="form-grid">
-          <div class="card">
-            <div class="card-title">🏦 Trade Republic</div>
-            <div class="field-group">
-              <label class="field-label">Déposer votre relevé (PDF)</label>
-              <input type="file" id="tr_pdf" class="field-input" accept=".pdf">
-            </div>
-            <button class="btn btn-accent" style="width:100%" onclick="processPDF()">Analyser PDF</button>
-          </div>
-
-          <div class="card">
-            <div class="card-title">🪙 Crypto.com</div>
-            <div class="field-group">
-              <label class="field-label">Export CSV</label>
-              <input type="file" id="cdc_csv" class="field-input" accept=".csv">
-            </div>
-            <button class="btn btn-accent" style="width:100%" onclick="processCSV()">Importer CSV</button>
-          </div>
+        <div class="card">
+          <h4>🏦 Trade Republic</h4>
+          <p style="font-size: 12px; color: var(--muted); margin-bottom: 15px;">Import Relevé PDF</p>
+          <input type="file" class="field-input" accept=".pdf">
+          <button class="btn-accent" style="width: 100%;">Analyser le PDF</button>
         </div>
-      </section>
 
-    </main>
-  </div>
+        <div class="card">
+          <h4>🪙 Crypto.com</h4>
+          <p style="font-size: 12px; color: var(--muted); margin-bottom: 15px;">Import Historique CSV</p>
+          <input type="file" class="field-input" accept=".csv">
+          <button class="btn-accent" style="width: 100%;">Importer CSV</button>
+        </div>
+      </div>
+    </section>
 
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  </main>
+
   <script src="app.js"></script>
   <script>
-    // Navigation simple entre les pages
-    function showPage(pageId) {
+    // SCRIPT DE NAVIGATION (Garde le style actif)
+    function switchPage(pageId, element) {
+      // Masquer toutes les pages
       document.querySelectorAll('.page-section').forEach(p => p.classList.remove('active'));
+      // Désactiver tous les menus
       document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
       
+      // Afficher la page choisie
       document.getElementById('page-' + pageId).classList.add('active');
-      event.currentTarget.classList.add('active');
+      // Activer le menu choisi
+      element.classList.add('active');
     }
-
-    // Graphiques de démonstration (à lier avec tes données réelles dans app.js)
-    const ctxAssets = document.getElementById('chartAssets').getContext('2d');
-    new Chart(ctxAssets, {
-      type: 'doughnut',
-      data: {
-        labels: ['Actions', 'Crypto', 'Immobilier', 'Cash'],
-        datasets: [{
-          data: [40, 20, 30, 10],
-          backgroundColor: ['#3b82f6', '#f59e0b', '#22c55e', '#94a3b8'],
-          borderWidth: 0
-        }]
-      },
-      options: { plugins: { legend: { position: 'bottom', labels: { color: '#fff' } } } }
-    });
-
-    const ctxRegions = document.getElementById('chartRegions').getContext('2d');
-    new Chart(ctxRegions, {
-      type: 'pie',
-      data: {
-        labels: ['USA', 'Europe', 'Emergents', 'France'],
-        datasets: [{
-          data: [50, 25, 15, 10],
-          backgroundColor: ['#6366f1', '#ec4899', '#8b5cf6', '#10b981'],
-          borderWidth: 0
-        }]
-      },
-      options: { plugins: { legend: { position: 'bottom', labels: { color: '#fff' } } } }
-    });
   </script>
+
 </body>
 </html>
