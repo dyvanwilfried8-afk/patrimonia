@@ -472,6 +472,13 @@ function addAsset() {
 
 // ─── CONNEXIONS ──────────────────────────────────────────────────────────
 
+// Parse un nombre au format français : "1 166,57 €" → 1166.57
+function parseFR(val) {
+  if (val === undefined || val === null || val === '') return 0;
+  const cleaned = String(val).replace(/\s/g, '').replace('€', '').replace(',', '.');
+  return parseFloat(cleaned) || 0;
+}
+
 async function connectSheets() {
   const apiKey=document.getElementById('sheetsApiKey')?.value?.trim();
   const url   =document.getElementById('sheetsUrl')?.value?.trim();
@@ -481,11 +488,16 @@ async function connectSheets() {
   const sheetId=match[1];
   const btn=document.getElementById('importSheetsBtn');
 
-  // Onglets à importer avec leur type d'actif associé
+  // Structure Google Sheet :
+  // CTO  : A=Ticker, B=Nom, C=Quantité, D=PRU, E=Prix, F=Investi, G=Val.Totale...
+  // Crypto & AIRBUS : même structure supposée
   const tabs = [
-    { name: 'CTO',    type: 'stock',  source: 'sheets-cto'    },
-    { name: 'Crypto', type: 'crypto', source: 'sheets-crypto'  },
-    { name: 'AIRBUS', type: 'esop',   source: 'sheets-airbus'  },
+    { name: 'CTO',    type: 'stock',  source: 'sheets-cto',
+      cols: { ticker:0, nom:1, qty:2, pru:3, prix:4 } },
+    { name: 'Crypto', type: 'crypto', source: 'sheets-crypto',
+      cols: { ticker:0, nom:1, qty:2, pru:3, prix:4 } },
+    { name: 'AIRBUS', type: 'esop',   source: 'sheets-airbus',
+      cols: { ticker:0, nom:1, qty:2, pru:3, prix:4 } },
   ];
 
   try {
@@ -500,22 +512,34 @@ async function connectSheets() {
       const data = await res.json();
       if (data.error) {
         console.warn(`Onglet "${tab.name}" ignoré :`, data.error.message);
-        continue; // on passe à l'onglet suivant sans planter
+        continue;
       }
+
+      const c = tab.cols;
       (data.values||[]).slice(1).forEach(row => {
-        if (!row[0]) return;
+        const ticker = (row[c.ticker]||'').trim();
+        if (!ticker) return;
+
+        const qty       = parseFR(row[c.qty]);
+        const buyPrice  = parseFR(row[c.pru]);
+        const currPrice = parseFR(row[c.prix]) || buyPrice;
+
+        if (qty === 0 && buyPrice === 0) return; // ligne vide ou ligne TOTAL
+
         const asset = {
-          name:         row[0],
+          name:         ticker,
+          label:        (row[c.nom]||ticker).trim(),
           source:       tab.source,
           type:         tab.type,
-          qty:          parseFloat(row[1]) || 1,
-          buyPrice:     parseFloat(row[2]) || 0,
-          currentPrice: parseFloat(row[3]) || parseFloat(row[2]) || 0,
+          qty,
+          buyPrice,
+          currentPrice: currPrice,
           geo:          tab.type === 'crypto' ? 'other' : 'world',
           sector:       tab.type === 'crypto' ? 'crypto' : 'mixed',
           currency:     'EUR',
-          fees:         parseFloat(row[5]) || 0,
+          fees:         0,
         };
+
         const idx = assets.findIndex(a => a.name === asset.name && a.source === tab.source);
         if (idx >= 0) assets[idx] = asset; else assets.push(asset);
         imported++;
@@ -530,7 +554,6 @@ async function connectSheets() {
   } catch(err){ showToast('Erreur : '+err.message,'#ef4444'); }
   finally{ if(btn) btn.textContent='⬇ Importer mon Google Sheet'; }
 }
-
 async function connectBinance() {
   const manual=document.getElementById('binanceManual')?.value?.trim();
   if(!manual) return showToast('Entrez vos soldes','#ef4444');
