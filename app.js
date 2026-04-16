@@ -478,23 +478,50 @@ async function connectSheets() {
   if(!apiKey||!url) return showToast('Clé API et URL requis','#ef4444');
   const match=url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
   if(!match) return showToast('URL invalide','#ef4444');
-  const sheetId=match[1], range=document.getElementById('sheetsRange')?.value?.trim()||'Feuil1';
+  const sheetId=match[1];
   const btn=document.getElementById('importSheetsBtn');
+
+  // Onglets à importer avec leur type d'actif associé
+  const tabs = [
+    { name: 'CTO',    type: 'stock',  source: 'sheets-cto'    },
+    { name: 'Crypto', type: 'crypto', source: 'sheets-crypto'  },
+    { name: 'AIRBUS', type: 'esop',   source: 'sheets-airbus'  },
+  ];
+
   try {
     if(btn) btn.textContent='⏳ Import en cours...';
-    const res=await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}?key=${apiKey}`);
-    const data=await res.json();
-    if(data.error) throw new Error(data.error.message);
     let imported=0;
-    (data.values||[]).slice(1).forEach(row=>{
-      if(!row[0]) return;
-      const asset={name:row[0],source:'sheets',type:'stock',qty:parseFloat(row[1])||1,
-        buyPrice:parseFloat(row[2])||0,currentPrice:parseFloat(row[3])||parseFloat(row[2])||0,
-        geo:'world',sector:'mixed',currency:'EUR',fees:0};
-      const idx=assets.findIndex(a=>a.name===asset.name&&a.source==='sheets');
-      if(idx>=0) assets[idx]=asset; else assets.push(asset);
-      imported++;
-    });
+
+    for (const tab of tabs) {
+      const encodedTab = encodeURIComponent(tab.name);
+      const res = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodedTab}?key=${apiKey}`
+      );
+      const data = await res.json();
+      if (data.error) {
+        console.warn(`Onglet "${tab.name}" ignoré :`, data.error.message);
+        continue; // on passe à l'onglet suivant sans planter
+      }
+      (data.values||[]).slice(1).forEach(row => {
+        if (!row[0]) return;
+        const asset = {
+          name:         row[0],
+          source:       tab.source,
+          type:         tab.type,
+          qty:          parseFloat(row[1]) || 1,
+          buyPrice:     parseFloat(row[2]) || 0,
+          currentPrice: parseFloat(row[3]) || parseFloat(row[2]) || 0,
+          geo:          tab.type === 'crypto' ? 'other' : 'world',
+          sector:       tab.type === 'crypto' ? 'crypto' : 'mixed',
+          currency:     'EUR',
+          fees:         parseFloat(row[5]) || 0,
+        };
+        const idx = assets.findIndex(a => a.name === asset.name && a.source === tab.source);
+        if (idx >= 0) assets[idx] = asset; else assets.push(asset);
+        imported++;
+      });
+    }
+
     saveLocalData(); initOverview();
     document.getElementById('sheetsStatus').textContent='Connecté';
     document.getElementById('sheetsStatus').className='badge badge-up';
