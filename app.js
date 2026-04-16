@@ -472,37 +472,91 @@ function addAsset() {
 
 // ─── CONNEXIONS ──────────────────────────────────────────────────────────
 
-// Parse un nombre au format français : "1 166,57 €" → 1166.57
+/**
+ * Parse un nombre au format français ou anglais.
+ * "1 166,57 €" → 1166.57 | "1,166.57" → 1166.57 | "42.5%" → 42.5
+ */
 function parseFR(val) {
   if (val === undefined || val === null || val === '') return 0;
-  const cleaned = String(val).replace(/\s/g, '').replace('€', '').replace(',', '.');
-  return parseFloat(cleaned) || 0;
+  let s = String(val).replace(/\s/g, '').replace('€', '').replace('%', '');
+  // Format français : 1.166,57
+  if (/^\d{1,3}(\.\d{3})+(,\d+)?$/.test(s)) s = s.replace(/\./g, '').replace(',', '.');
+  // Format FR simple : 1166,57
+  else s = s.replace(',', '.');
+  return parseFloat(s) || 0;
+}
+
+/**
+ * Détecte automatiquement l'index d'une colonne à partir des mots-clés.
+ * Retourne -1 si non trouvée.
+ */
+function detectCol(headers, keywords) {
+  const norm = h => String(h).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  for (let i = 0; i < headers.length; i++) {
+    const h = norm(headers[i]);
+    if (keywords.some(kw => h.includes(kw))) return i;
+  }
+  return -1;
+}
+
+/**
+ * Analyse la ligne d'en-tête et retourne un objet col → index.
+ * Fonctionne quelle que soit la structure du sheet.
+ */
+function parseHeaders(headerRow) {
+  const cols = {};
+  const maps = [
+    { key: 'ticker',    kw: ['ticker','actif','symbole','symbol','isin','code'] },
+    { key: 'nom',       kw: ['nom','name','libelle','title','designation','description'] },
+    { key: 'qty',       kw: ['quantite','qty','qte','nombre','nb','units','shares'] },
+    { key: 'pru',       kw: ['pru','prix de revient','prix achat','pa ','cost','buy price','achat'] },
+    { key: 'prix',      kw: ['prix','cours','price','valeur unitaire','last','close','current'] },
+    { key: 'investi',   kw: ['investi','invested','montant','capital','cost basis'] },
+    { key: 'valTotale', kw: ['val. totale','valeur totale','total','valeur','portfolio','position'] },
+    { key: 'perf1d',    kw: ['1jour','1j','jour','1day','day','daily'] },
+    { key: 'perf1w',    kw: ['hebdo','1w','week','semaine','7j','7d'] },
+    { key: 'perf1m',    kw: ['1mois','1m','mois','month','30j','30d'] },
+    { key: 'perf6m',    kw: ['6mois','6m','6month','180j'] },
+    { key: 'perfYTD',   kw: ['ytd','depuis jan','year to date','depuis debut'] },
+    { key: 'perfTotal', kw: ['perf %','perf%','performance','total %','rendement','return'] },
+    { key: 'categorie', kw: ['categorie','category','type','classe','asset class'] },
+    { key: 'secteur',   kw: ['secteur','sector','industrie','industry'] },
+    { key: 'geo',       kw: ['zone geo','geo','region','geographie','country','pays','localisation'] },
+  ];
+  maps.forEach(({ key, kw }) => {
+    const idx = detectCol(headerRow, kw);
+    if (idx >= 0) cols[key] = idx;
+  });
+  return cols;
 }
 
 async function connectSheets() {
-  const apiKey=document.getElementById('sheetsApiKey')?.value?.trim();
-  const url   =document.getElementById('sheetsUrl')?.value?.trim();
-  if(!apiKey||!url) return showToast('Clé API et URL requis','#ef4444');
-  const match=url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-  if(!match) return showToast('URL invalide','#ef4444');
-  const sheetId=match[1];
-  const btn=document.getElementById('importSheetsBtn');
+  const apiKey = document.getElementById('sheetsApiKey')?.value?.trim();
+  const url    = document.getElementById('sheetsUrl')?.value?.trim();
+  if (!apiKey || !url) return showToast('Clé API et URL requis', '#ef4444');
+  const match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if (!match) return showToast('URL invalide', '#ef4444');
+  const sheetId = match[1];
+  const btn = document.getElementById('importSheetsBtn');
 
-  // Structure Google Sheet :
-  // CTO  : A=Ticker, B=Nom, C=Quantité, D=PRU, E=Prix, F=Investi, G=Val.Totale...
-  // Crypto & AIRBUS : même structure supposée
+  // Onglets à importer — type par défaut si non détecté dans les données
   const tabs = [
-    { name: 'CTO',    type: 'stock',  source: 'sheets-cto',
-      cols: { ticker:0, nom:1, qty:2, pru:3, prix:4 } },
-    { name: 'Crypto', type: 'crypto', source: 'sheets-crypto',
-      cols: { ticker:0, nom:1, qty:2, pru:3, prix:4 } },
-    { name: 'AIRBUS', type: 'esop',   source: 'sheets-airbus',
-      cols: { ticker:0, nom:1, qty:2, pru:3, prix:4 } },
+    { name: 'CTO',    defaultType: 'stock',  source: 'sheets-cto'    },
+    { name: 'Crypto', defaultType: 'crypto', source: 'sheets-crypto'  },
+    { name: 'AIRBUS', defaultType: 'esop',   source: 'sheets-airbus'  },
   ];
 
+  // Correspondance catégorie textuelle → type interne
+  const typeMap = {
+    'etf': 'stock', 'action': 'stock', 'actions': 'stock', 'stock': 'stock',
+    'crypto': 'crypto', 'cryptomonnaie': 'crypto',
+    'esop': 'esop', 'per': 'esop', 'pea': 'stock', 'epargne': 'savings',
+  };
+
   try {
-    if(btn) btn.textContent='⏳ Import en cours...';
-    let imported=0;
+    if (btn) btn.textContent = '⏳ Import en cours...';
+    let imported = 0;
+    let warnings = [];
 
     for (const tab of tabs) {
       const encodedTab = encodeURIComponent(tab.name);
@@ -512,32 +566,70 @@ async function connectSheets() {
       const data = await res.json();
       if (data.error) {
         console.warn(`Onglet "${tab.name}" ignoré :`, data.error.message);
+        warnings.push(tab.name);
         continue;
       }
 
-      const c = tab.cols;
-      (data.values||[]).slice(1).forEach(row => {
-        const ticker = (row[c.ticker]||'').trim();
-        if (!ticker) return;
+      const rows = data.values || [];
+      if (rows.length < 2) continue;
 
-        const qty       = parseFR(row[c.qty]);
-        const buyPrice  = parseFR(row[c.pru]);
-        const currPrice = parseFR(row[c.prix]) || buyPrice;
+      // Détection automatique des colonnes via l'en-tête
+      const cols = parseHeaders(rows[0]);
+      console.log(`[${tab.name}] Colonnes détectées :`, cols);
 
-        if (qty === 0 && buyPrice === 0) return; // ligne vide ou ligne TOTAL
+      // Si pas de colonne ticker/nom détectée → on essaye col 0 par défaut
+      const tickerIdx = cols.ticker ?? cols.nom ?? 0;
+
+      rows.slice(1).forEach((row, ri) => {
+        const raw = row[tickerIdx] || '';
+        const ticker = raw.trim();
+        if (!ticker) return; // ligne vide
+
+        const qty        = cols.qty       !== undefined ? parseFR(row[cols.qty])       : 1;
+        const buyPrice   = cols.pru       !== undefined ? parseFR(row[cols.pru])       : 0;
+        const currPrice  = cols.prix      !== undefined ? parseFR(row[cols.prix])      : buyPrice;
+        const invested   = cols.investi   !== undefined ? parseFR(row[cols.investi])   : qty * buyPrice;
+        const totalVal   = cols.valTotale !== undefined ? parseFR(row[cols.valTotale]) : qty * currPrice;
+        const perf1d     = cols.perf1d    !== undefined ? parseFR(row[cols.perf1d])    : 0;
+        const perf1w     = cols.perf1w    !== undefined ? parseFR(row[cols.perf1w])    : 0;
+        const perf1m     = cols.perf1m    !== undefined ? parseFR(row[cols.perf1m])    : 0;
+        const perf6m     = cols.perf6m    !== undefined ? parseFR(row[cols.perf6m])    : 0;
+        const perfYTD    = cols.perfYTD   !== undefined ? parseFR(row[cols.perfYTD])   : 0;
+        const perfTotal  = cols.perfTotal !== undefined ? parseFR(row[cols.perfTotal]) : 0;
+        const catRaw     = cols.categorie !== undefined ? (row[cols.categorie]||'').toLowerCase().trim() : '';
+        const secteur    = cols.secteur   !== undefined ? (row[cols.secteur]  ||'').trim() : '';
+        const geoRaw     = cols.geo       !== undefined ? (row[cols.geo]      ||'').trim() : 'Monde';
+        const nomLabel   = cols.nom       !== undefined ? (row[cols.nom]      ||ticker).trim() : ticker;
+
+        // Ligne TOTAL ou séparateur → on ignore
+        if (ticker.toUpperCase() === 'TOTAL' || (qty === 0 && buyPrice === 0 && currPrice === 0)) return;
+
+        // Déduction du type selon la catégorie ou le tab par défaut
+        const detectedType = typeMap[catRaw] || tab.defaultType;
+
+        // Géo normalisée
+        const geoNorm = geoRaw.toLowerCase().includes('usa') || geoRaw.toLowerCase().includes('etats') ? 'usa'
+          : geoRaw.toLowerCase().includes('europ') ? 'europe'
+          : geoRaw.toLowerCase().includes('emerg') ? 'emerging'
+          : geoRaw.toLowerCase() === 'monde' || geoRaw.toLowerCase() === 'world' ? 'world'
+          : 'other';
 
         const asset = {
-          name:         ticker,
-          label:        (row[c.nom]||ticker).trim(),
-          source:       tab.source,
-          type:         tab.type,
+          name:        ticker,
+          label:       nomLabel,
+          source:      tab.source,
+          type:        detectedType,
           qty,
           buyPrice,
           currentPrice: currPrice,
-          geo:          tab.type === 'crypto' ? 'other' : 'world',
-          sector:       tab.type === 'crypto' ? 'crypto' : 'mixed',
-          currency:     'EUR',
-          fees:         0,
+          invested,
+          totalValue:  totalVal,
+          perf1d,  perf1w,  perf1m,  perf6m,  perfYTD,  perfTotal,
+          category:    catRaw,
+          sector:      secteur,
+          geo:         geoNorm,
+          currency:    'EUR',
+          fees:        0,
         };
 
         const idx = assets.findIndex(a => a.name === asset.name && a.source === tab.source);
@@ -546,13 +638,21 @@ async function connectSheets() {
       });
     }
 
-    saveLocalData(); initOverview();
-    document.getElementById('sheetsStatus').textContent='Connecté';
-    document.getElementById('sheetsStatus').className='badge badge-up';
-    document.getElementById('dashboardDetected').style.display='block';
-    showToast(imported+' actifs importés ✓','#22c55e');
-  } catch(err){ showToast('Erreur : '+err.message,'#ef4444'); }
-  finally{ if(btn) btn.textContent='⬇ Importer mon Google Sheet'; }
+    saveLocalData();
+    initOverview();
+    document.getElementById('sheetsStatus').textContent = 'Connecté';
+    document.getElementById('sheetsStatus').className = 'badge badge-up';
+    document.getElementById('dashboardDetected').style.display = 'block';
+
+    const warnMsg = warnings.length ? ` (onglets manquants : ${warnings.join(', ')})` : '';
+    showToast(imported + ' actifs importés ✓' + warnMsg, '#22c55e');
+
+  } catch (err) {
+    showToast('Erreur : ' + err.message, '#ef4444');
+    console.error(err);
+  } finally {
+    if (btn) btn.textContent = '⬇ Importer mon Google Sheet';
+  }
 }
 async function connectBinance() {
   const manual=document.getElementById('binanceManual')?.value?.trim();
