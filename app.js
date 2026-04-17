@@ -57,6 +57,12 @@ loan:‘Simulation de prêt’
 };
 
 function navigate(pageId) {
+// Fermer sidebar sur mobile
+const sb = document.getElementById(‘sidebar’);
+const ov = document.getElementById(‘sidebarOverlay’);
+if (sb) sb.classList.remove(‘open’);
+if (ov) ov.classList.remove(‘open’);
+
 document.querySelectorAll(’.page-section’).forEach(s => s.classList.remove(‘active’));
 const target = document.getElementById(‘page-’ + pageId);
 if (target) target.classList.add(‘active’);
