@@ -21,7 +21,7 @@ function applyTheme(theme) {
   document.documentElement.setAttribute('data-theme', theme);
   localStorage.setItem('patrimonia_theme', theme);
   const btn = document.getElementById('themeToggleBtn');
-  if (btn) btn.textContent = theme === 'dark' ? '☀️' : '🌙';
+  if (btn) btn.textContent = theme === 'dark' ? '☀' : '☽';
 }
 
 function toggleTheme() { applyTheme(currentTheme === 'dark' ? 'light' : 'dark'); }
