@@ -555,21 +555,24 @@ nav { padding: 16px 12px; flex: 1; }
   display: flex; align-items: center; justify-content: center;
 }
 
-/* ── MOBILE HAMBURGER ── */
 .hamburger {
   display: none;
   background: none;
   border: none;
   color: var(--text);
-  font-size: 20px;
+  font-size: 22px;
   cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  line-height: 1;
 }
+.hamburger:hover { background: var(--surface2); }
 
 .sidebar-overlay {
   display: none;
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.5);
+  background: rgba(0,0,0,0.55);
   z-index: 99;
 }
 
@@ -613,40 +616,11 @@ body {
 @media (max-width: 900px) {
   .mobile-nav { display: flex; }
   .main { padding-bottom: 70px; }
-}
-
-/* ── SIDEBAR TOUJOURS VISIBLE — override le collapse mobile ── */
-.sidebar {
-  transform: translateX(0) !important;
-}
-.main {
-  margin-left: var(--sidebar) !important;
-  width: calc(100% - var(--sidebar)) !important;
-  max-width: calc(100% - var(--sidebar)) !important;
-}
-/* Masquer le bouton hamburger et l'overlay puisque la sidebar est toujours là */
-.hamburger { display: none !important; }
-.sidebar-overlay { display: none !important; }
-
-/* Splash screen */
-.splash {
-  position: fixed; inset: 0;
-  background: var(--bg);
-  display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
-  z-index: 9999;
-  transition: opacity 0.4s ease;
-}
-.splash.hidden { opacity: 0; pointer-events: none; }
-.splash-logo { font-size: 60px; margin-bottom: 16px; }
-.splash-name { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 600; color: var(--text); }
-.splash-name span {  }
-.splash-sub { color: var(--muted); font-size: 13px; margin-top: 6px; }
   .sidebar { transform: translateX(-100%); }
   .sidebar.open { transform: translateX(0); }
-  .sidebar-overlay.open { display: block; }
-  .main { margin-left: 0; }
-  .hamburger { display: block; }
+  .sidebar-overlay.open { display: block !important; }
+  .main { margin-left: 0 !important; width: 100% !important; max-width: 100% !important; }
+  .hamburger { display: flex !important; }
   .grid-2, .grid-3, .grid-13, .grid-31 { grid-template-columns: 1fr; }
   .kpi-grid { grid-template-columns: 1fr 1fr; }
   .content { padding: 20px 16px; }
@@ -657,6 +631,20 @@ body {
 @media (max-width: 480px) {
   .kpi-grid { grid-template-columns: 1fr; }
 }
+
+/* ── SPLASH SCREEN ── */
+.splash {
+  position: fixed; inset: 0;
+  background: var(--bg);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  z-index: 9999;
+  transition: opacity 0.4s ease;
+}
+.splash.hidden { opacity: 0; pointer-events: none; }
+.splash-logo { font-size: 60px; margin-bottom: 16px; }
+.splash-name { font-family: 'Aptos', 'Inter', sans-serif; font-size: 24px; font-weight: 600; color: var(--text); }
+.splash-sub { color: var(--muted); font-size: 13px; margin-top: 6px; }
 
 /* ── SORT BUTTONS ── */
 .sort-btn {
