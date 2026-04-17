@@ -59,7 +59,7 @@ self.addEventListener('fetch', e => {
 
   // Fichiers locaux : Network First
   // → Toujours essayer le réseau en premier (pour avoir la dernière version)
-  // → Si hors-ligne, utiliser le cache
+  // → Si hors-ligne, utiliser le cache (avec ignoreSearch pour ?v= query strings)
   // → Si pas dans le cache non plus, retourner une réponse 503 propre (jamais undefined)
   e.respondWith(
     fetch(e.request)
@@ -67,29 +67,41 @@ self.addEventListener('fetch', e => {
         // Mettre à jour le cache avec la nouvelle version
         if (response && response.status === 200) {
           const clone = response.clone();
-          caches.open(CACHE).then(cache => cache.put(e.request, clone));
+          caches.open(CACHE).then(cache => {
+            // Stocker SANS query string pour éviter les doublons
+            const cleanUrl = e.request.url.split('?')[0];
+            const cleanRequest = new Request(cleanUrl);
+            cache.put(cleanRequest, clone);
+          });
         }
         return response;
       })
-      .catch(() =>
-        caches.match(e.request).then(cached => {
-          if (cached) return cached;
-          // Fallback HTML pour navigation offline
-          if (e.request.headers.get('accept')?.includes('text/html')) {
-            return new Response(
-              '<html><body style="font-family:sans-serif;text-align:center;padding:40px;background:#0b0b0f;color:#f0f2f5;">' +
-              '<h2>📡 Hors-ligne</h2><p>Reconnectez-vous pour accéder à Patrimonia.</p>' +
-              '<button onclick="location.reload()" style="margin-top:16px;padding:10px 20px;background:#3b82f6;color:#fff;border:none;border-radius:8px;cursor:pointer;">Réessayer</button>' +
-              '</body></html>',
-              { status: 503, headers: { 'Content-Type': 'text/html' } }
-            );
-          }
-          // Pour JS/CSS/autres : réponse vide mais valide (jamais undefined)
-          return new Response('', {
-            status: 503,
-            headers: { 'Content-Type': 'text/plain' }
-          });
-        })
-      )
+      .catch(() => {
+        // Chercher dans le cache en ignorant les query strings (?v=3, ?v=5, etc.)
+        return caches.open(CACHE).then(cache => {
+          // D'abord essayer avec l'URL exacte
+          return caches.match(e.request, { ignoreSearch: true })
+            .then(cached => {
+              if (cached) return cached;
+
+              // Fallback HTML pour navigation offline
+              if (e.request.headers.get('accept')?.includes('text/html')) {
+                return new Response(
+                  '<html><body style="font-family:sans-serif;text-align:center;padding:40px;background:#0b0b0f;color:#f0f2f5;">' +
+                  '<h2>\uD83D\uDCE1 Hors-ligne</h2>' +
+                  '<p>Reconnectez-vous pour acc\u00E9der \u00E0 Patrimonia.</p>' +
+                  '<button onclick="location.reload()" style="margin-top:16px;padding:10px 20px;background:#3b82f6;color:#fff;border:none;border-radius:8px;cursor:pointer;">R\u00E9essayer</button>' +
+                  '</body></html>',
+                  { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } }
+                );
+              }
+              // Pour JS/CSS/autres : réponse vide mais valide (jamais undefined)
+              return new Response('/* offline */', {
+                status: 503,
+                headers: { 'Content-Type': 'text/plain' }
+              });
+            });
+        });
+      })
   );
 });
