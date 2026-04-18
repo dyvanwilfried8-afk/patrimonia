@@ -1,1428 +1,2507 @@
-// =====================================================================
-// PATRIMONIA - DATA LAYER & LOGIC ENGINE (v5.0)
-// Aligné avec dashboard.html — Fixes: dividendes, ESOP percol, aides, analyse, noms, dark/light, Aptos, fiscalité liée, simulation prêt
-// =====================================================================
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Patrimonia</title>
 
-// 1. CONFIGURATION SUPABASE
-const SUPABASE_URL  = 'https://grvxurgvxwmheiollrmp.supabase.co';
-const SUPABASE_ANON = 'sb_publishable_7XITRulkeLGYMis4S02PiA_JaDeUQQE';
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#0b0b0f" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Patrimonia" />
+  <link rel="apple-touch-icon" href="icon.svg" />
 
-const { createClient } = supabase;
-const sb = createClient(SUPABASE_URL, SUPABASE_ANON);
-let currentUser = null;
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Aptos:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <!-- Supabase CDN (REQUIS avant app.js) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 
-const fmt = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
-
-// ─── THÈME LIGHT/DARK ─────────────────────────────────────────────────
-let currentTheme = localStorage.getItem('patrimonia_theme') || 'dark';
-
-function applyTheme(theme) {
-  currentTheme = theme;
-  document.documentElement.setAttribute('data-theme', theme);
-  localStorage.setItem('patrimonia_theme', theme);
-  const btn = document.getElementById('themeToggleBtn');
-  if (btn) btn.textContent = theme === 'dark' ? '☀' : '☽';
-}
-
-function toggleTheme() { applyTheme(currentTheme === 'dark' ? 'light' : 'dark'); }
-
-// ─── UTILITAIRES ───────────────────────────────────────────────────────
-
-function hideSplash() {
-  const splash = document.getElementById('splash');
-  if (splash) { splash.classList.add('hidden'); setTimeout(() => { splash.style.display = 'none'; }, 450); }
-}
-
-function safeSet(id, value) {
-  const el = document.getElementById(id);
-  if (el) el.textContent = value;
-}
-
-function showToast(msg, color) {
-  const t = document.createElement('div');
-  t.className = 'toast';
-  t.style.borderLeft = '3px solid ' + (color || '#3b82f6');
-  t.textContent = msg;
-  document.body.appendChild(t);
-  setTimeout(() => t.remove(), 3000);
-}
-
-// ─── NAVIGATION ────────────────────────────────────────────────────────
-
-const PAGE_TITLES = {
-  overview:'Tableau de bord', portfolio:'Portefeuille', savings:'Épargne bancaire',
-  salary:'Salaire & Budget', projection:'Projection DCA', analysis:'Analyse complète',
-  fees:'Scanner de frais', fiscalite:'Fiscalité', sources:'Connexions', settings:'Paramètres',
-  loan:'Simulation de prêt'
-};
-
-function navigate(pageId) {
-  // Fermer sidebar sur mobile
-  const sb = document.getElementById('sidebar');
-  const ov = document.getElementById('sidebarOverlay');
-  if (sb) sb.classList.remove('open');
-  if (ov) ov.classList.remove('open');
-
-  document.querySelectorAll('.page-section').forEach(s => s.classList.remove('active'));
-  const target = document.getElementById('page-' + pageId);
-  if (target) target.classList.add('active');
-  safeSet('topbarTitle', PAGE_TITLES[pageId] || pageId);
-  document.querySelectorAll('.nav-item').forEach(el => {
-    el.classList.remove('active');
-    if ((el.getAttribute('onclick') || '').includes("'" + pageId + "'")) el.classList.add('active');
-  });
-  document.querySelectorAll('.mobile-nav-item').forEach(el => {
-    el.classList.remove('active');
-    if (el.id === 'mn-' + pageId) el.classList.add('active');
-  });
-  if (pageId === 'projection') updateProjection();
-  if (pageId === 'analysis')   { computeDiversityScore(); renderAnalysisPage(); }
-  if (pageId === 'fees')       renderFees();
-  if (pageId === 'savings')    renderSavings();
-  if (pageId === 'salary')     renderSalary();
-  if (pageId === 'portfolio')  { renderPortfolio(); renderAssetChart(); }
-  if (pageId === 'fiscalite')  { autoFillFiscalFromSalary(); if(typeof calculateTax==='function') calculateTax(); }
-  if (pageId === 'loan')       updateLoanCalc();
-}
-
-function toggleSidebar() {
-  document.getElementById('sidebar').classList.toggle('open');
-  document.getElementById('sidebarOverlay').classList.toggle('open');
-}
-
-// ─── INIT ───────────────────────────────────────────────────────────────
-
-document.addEventListener('DOMContentLoaded', () => {
-  initApp();
-  document.querySelectorAll('.modal-overlay').forEach(overlay => {
-    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.classList.remove('open'); });
-  });
-});
-
-async function initApp() {
-  applyTheme(currentTheme);
-  const splashTimeout = setTimeout(hideSplash, 5000);
-  try {
-    const { data: { session } } = await sb.auth.getSession();
-    if (!session) { clearTimeout(splashTimeout); hideSplash(); window.location.href = 'index.html'; return; }
-    currentUser = session.user.id;
-    console.log('Connecté:', currentUser);
-    const email = session.user.email || '';
-    safeSet('userName', email);
-    safeSet('settingsEmail', email);
-    const av = document.getElementById('userAvatar');
-    if (av) av.textContent = email.charAt(0).toUpperCase();
-    loadLocalData();
-    initOverview();
-    updateProjection();
-    autoFillFiscalFromSalary();
-    const now = new Date();
-    safeSet('lastUpdate', now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }));
-  } catch (err) {
-    console.error('Erreur init:', err);
-    showToast('Erreur: ' + err.message, '#ef4444');
-  } finally {
-    clearTimeout(splashTimeout);
-    hideSplash();
-  }
-}
-
-async function logout() { await sb.auth.signOut(); window.location.href = 'index.html'; }
-
-async function refreshData() {
-  safeSet('lastUpdate', 'Actualisation...');
-  loadLocalData(); initOverview();
-  autoFillFiscalFromSalary();
-  safeSet('lastUpdate', new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }));
-  showToast('Actualisé ✓', '#22c55e');
-}
-
-// ─── DONNÉES LOCALES ────────────────────────────────────────────────────
-
-let assets = [], savings = [], expenses = [], salaryData = {}, settings = { currency: 'EUR', exposureThreshold: 20 };
-
-function loadLocalData() {
-  try {
-    assets     = JSON.parse(localStorage.getItem('patrimonia_assets')   || '[]');
-    savings    = JSON.parse(localStorage.getItem('patrimonia_savings')  || '[]');
-    expenses   = JSON.parse(localStorage.getItem('patrimonia_expenses') || '[]');
-    salaryData = JSON.parse(localStorage.getItem('patrimonia_salary')   || '{}');
-    settings   = JSON.parse(localStorage.getItem('patrimonia_settings') || '{"currency":"EUR","exposureThreshold":20}');
-  } catch(e) { console.warn('Erreur données locales:', e); }
-}
-
-function saveLocalData() {
-  localStorage.setItem('patrimonia_assets',   JSON.stringify(assets));
-  localStorage.setItem('patrimonia_savings',  JSON.stringify(savings));
-  localStorage.setItem('patrimonia_expenses', JSON.stringify(expenses));
-  localStorage.setItem('patrimonia_salary',   JSON.stringify(salaryData));
-  localStorage.setItem('patrimonia_settings', JSON.stringify(settings));
-}
-
-// ─── OVERVIEW ───────────────────────────────────────────────────────────
-
-let chartHistoInstance = null, showSavingsInTotal = true;
-
-// Helpers : valeur et coût d'un actif (utilise valTotale du Sheet si disponible)
-function assetValue(a) {
-  if (a.valTotale && a.valTotale > 0) return a.valTotale;
-  return (a.qty || 0) * (a.currentPrice || a.buyPrice || 0);
-}
-function assetCost(a) {
-  if (a.investi && a.investi > 0) return a.investi;
-  return (a.qty || 0) * (a.buyPrice || 0);
-}
-function getCssVar(name) {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
-
-function initOverview() {
-  const totalAssets = assets.reduce((s, a) => s + assetValue(a), 0);
-  const totalSav    = savings.reduce((s, sv) => s + (sv.balance || 0), 0);
-  const total       = showSavingsInTotal ? totalAssets + totalSav : totalAssets;
-  safeSet('kpi-total', fmt.format(total));
-  renderCategoryCards(totalAssets, totalSav, total);
-  renderPnlStats(totalAssets);
-  renderBudgetWidget();
-  renderBestWorst();
-  renderHistoChart(total);
-  renderDividendsOverview();
-}
-
-function renderCategoryCards(totalAssets, totalSav, total) {
-  const el = document.getElementById('categoryCards');
-  if (!el) return;
-  const cats = [
-    { id:'stock',   label:'Actions / ETF',   icon:'\uD83D\uDCC8', color:'#3b82f6' },
-    { id:'crypto',  label:'Crypto',           icon:'\u20BF',       color:'#f59e0b' },
-    { id:'esop',    label:'ESOP / PER',       icon:'\uD83C\uDFE2', color:'#a78bfa' },
-    { id:'savings', label:'\u00C9pargne bancaire', icon:'\uD83C\uDFE6', color:'#22c55e' },
-  ];
-  const rows = cats.map(cat => {
-    const val = cat.id === 'savings' ? totalSav
-      : assets.filter(a => (a.type || 'stock') === cat.id).reduce((s, a) => s + assetValue(a), 0);
-    if (val === 0) return '';
-    const pct = total > 0 ? ((val / total) * 100).toFixed(1) : 0;
-    return `<div class="cat-card" onclick="navigate('${cat.id === 'savings' ? 'savings' : 'portfolio'}')">
-      <div class="cat-icon" style="background:${cat.color}22;">${cat.icon}</div>
-      <div class="cat-info"><div class="cat-name">${cat.label}</div><div class="cat-sub">${pct}% du patrimoine</div></div>
-      <div class="cat-right"><div class="cat-val">${fmt.format(val)}</div></div>
-    </div>`;
-  }).filter(Boolean);
-  el.innerHTML = rows.length ? rows.join('') : '<div class="empty-state"><div class="icon">\uD83D\uDCCA</div><p>Ajoutez vos actifs via <b>Connexions</b></p></div>';
-}
-
-function renderPnlStats(totalAssets) {
-  const invested = assets.reduce((s, a) => s + assetCost(a), 0);
-  const pnl = totalAssets - invested;
-  const pnlPct = invested > 0 ? ((pnl / invested) * 100).toFixed(2) : 0;
-  const color = pnl >= 0 ? '#22c55e' : '#ef4444';
-  const el = document.getElementById('kpi-pnl');
-  if (el) { el.textContent = fmt.format(pnl); el.style.color = color; }
-  safeSet('kpi-pnl-pct', (pnl >= 0 ? '+' : '') + pnlPct + '%');
-  safeSet('statPositions', assets.length);
-  [['statD1', pnl * 0.003], ['statW1', pnl * 0.012], ['statM1', pnl * 0.04], ['statYtd', pnl * 0.11]].forEach(([id, v]) => {
-    const e = document.getElementById(id);
-    if (!e) return;
-    e.textContent = (v >= 0 ? '+' : '') + fmt.format(v);
-    e.style.color = v >= 0 ? '#22c55e' : '#ef4444';
-  });
-}
-
-function renderBestWorst() {
-  if (!assets.length) return;
-  const withPerf = assets.map(a => {
-    // Use sheet's perfTotal if available (already correct), else calculate
-    let perf;
-    if (a.perfTotal && a.perfTotal !== 0) {
-      // Normalize: ratio (0.476) or already % (47.6)
-      perf = Math.abs(a.perfTotal) <= 2 ? a.perfTotal * 100 : a.perfTotal;
-    } else {
-      const val = assetValue(a), cost = assetCost(a);
-      perf = cost > 0 ? (val - cost) / cost * 100 : 0;
+    :root {
+      --bg:       #0b0b0f;
+      --surface:  #111116;
+      --surface2: #18181f;
+      --surface3: #1f1f28;
+      --border:   rgba(255,255,255,0.06);
+      --border2:  rgba(255,255,255,0.10);
+      --accent:   #8b5cf6;
+      --accent2:  #a78bfa;
+      --green:    #22c55e;
+      --text: #f0f2f5;
+      --muted:    #52525b;
+      --muted2:   #71717a;
+      --red:      #ef4444; --danger:   #ef4444;
+      --gold:     #f59e0b;
+      --sidebar: 220px;
     }
-    return { name: a.name || '?', perf };
-  }).filter(a => !isNaN(a.perf)).sort((a, b) => b.perf - a.perf);
-  if (withPerf.length) {
-    safeSet('statBestName',  withPerf[0].name);
-    safeSet('statBestPct',   (withPerf[0].perf >= 0 ? '+' : '') + withPerf[0].perf.toFixed(1) + '%');
-    safeSet('statWorstName', withPerf[withPerf.length - 1].name);
-    safeSet('statWorstPct',  withPerf[withPerf.length - 1].perf.toFixed(1) + '%');
-  }
-}
 
-function renderBudgetWidget() {
-  const net = salaryData.net || 0;
-  const saved = salaryData.saved || 0;
-  const aides = (salaryData.apl||0) + (salaryData.caf||0) + (salaryData.transport||0) + (salaryData.tr||0) + (salaryData.other||0);
-  const totalRevenu = net + aides;
-  const fixed = expenses.reduce((s, e) => s + (e.amount || 0), 0);
-  const rate = totalRevenu > 0 ? Math.round((saved / totalRevenu) * 100) : 0;
-  safeSet('rateVal', rate + '%');
-  safeSet('salaryDisplay',  totalRevenu ? fmt.format(totalRevenu) : '–');
-  safeSet('savingsDisplay', saved ? fmt.format(saved) : '–');
-  safeSet('expensesDisplay',fixed ? fmt.format(fixed) : '–');
-  const sb2 = document.getElementById('savingsBar'), eb = document.getElementById('expensesBar');
-  if (sb2) sb2.style.width = Math.min(rate, 100) + '%';
-  if (eb && totalRevenu > 0) eb.style.width = Math.min((fixed / totalRevenu) * 100, 100) + '%';
-}
-
-function toggleSavingsFilter() {
-  showSavingsInTotal = !showSavingsInTotal;
-  const btn = document.getElementById('btnToggleSavings');
-  if (btn) btn.style.opacity = showSavingsInTotal ? '1' : '0.5';
-  initOverview();
-}
-
-function renderHistoChart(total) {
-  const ctx = document.getElementById('chartHistorique');
-  if (!ctx) return;
-  if (chartHistoInstance) chartHistoInstance.destroy();
-  const pts = 12, labels = [], data = [], now = new Date();
-  for (let i = pts; i >= 0; i--) {
-    const d = new Date(now); d.setMonth(d.getMonth() - i);
-    labels.push(d.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' }));
-    data.push(Math.round(total * (1 - (i / pts) * 0.25)));
-  }
-  data[data.length - 1] = total;
-  chartHistoInstance = new Chart(ctx.getContext('2d'), {
-    type: 'line',
-    data: { labels, datasets: [{ data, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.08)', fill: true, tension: 0.4, pointRadius: 0, borderWidth: 2 }] },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
-      scales: { y: { display: false }, x: { grid: { display: false }, ticks: { color: getComputedStyle(document.documentElement).getPropertyValue('--muted2')||'#52525b', font: { size: 10 }, maxTicksLimit: 6 } } } }
-  });
-}
-
-function setHistoPeriod(period, btn) {
-  document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active', 'active-default'));
-  btn.classList.add('active');
-  initOverview();
-}
-
-// ─── PORTEFEUILLE ────────────────────────────────────────────────────────
-
-let currentSort = 'val_desc';
-
-function setSortFilter(sort) {
-  currentSort = sort;
-  document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
-  const btn = document.getElementById('sort_' + sort);
-  if (btn) btn.classList.add('active');
-  renderPortfolio();
-}
-
-function renderPortfolio() {
-  const tbody = document.getElementById('portfolioTbody');
-  if (!tbody) return;
-  const srcF = document.getElementById('filterSource')?.value || 'all';
-  const typF = document.getElementById('filterType')?.value   || 'all';
-  let filtered = assets.filter(a => (srcF === 'all' || a.source === srcF) && (typF === 'all' || a.type === typF));
-  filtered.sort((a, b) => {
-    const va = assetValue(a), vb = assetValue(b);
-    const ca = assetCost(a),  cb = assetCost(b);
-    const pa = ca > 0 ? (va-ca)/ca*100 : 0;
-    const pb = cb > 0 ? (vb-cb)/cb*100 : 0;
-    if (currentSort==='val_desc')         return vb - va;
-    if (currentSort==='perf_total_desc')  return pb - pa;
-    if (currentSort==='perf_total_asc')   return pa - pb;
-    return vb - va;
-  });
-  if (!filtered.length) {
-    tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:24px;">Aucun actif — ajoutez-en via Connexions</td></tr>';
-    return;
-  }
-  const totalVal = filtered.reduce((s, a) => s + assetValue(a), 0);
-  const typeLabels = { stock:'ETF', crypto:'Crypto', savings:'\u00C9pargne', esop:'ESOP' };
-
-  const fmtPct = (v) => {
-    if (v === undefined || v === null || isNaN(v)) return '<span class="perf-zero">\u2013</span>';
-    // Normalize: if |v| <= 2, it's a ratio (0.476) → multiply by 100
-    //            if |v| > 2, it's already a % value (47.6) → use as-is
-    const pct = Math.abs(v) <= 2 ? v * 100 : v;
-    if (Math.abs(pct) < 0.001) return '<span class="perf-zero">\u2013</span>';
-    const cls = pct >= 0 ? 'perf-pos' : 'perf-neg';
-    return `<span class="${cls}">${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%</span>`;
-  };
-
-  tbody.innerHTML = filtered.map(a => {
-    const val   = assetValue(a);
-    const cost  = assetCost(a);
-    const pnl   = val - cost;
-    // perfTotal from sheet can be ratio (0.476) or % string stripped (47.6)
-    // fmtPct handles both via the <=2 threshold normalization
-    const pnlPct = a.perfTotal && a.perfTotal !== 0
-      ? (Math.abs(a.perfTotal) <= 2 ? a.perfTotal * 100 : a.perfTotal)
-      : cost > 0 ? (pnl / cost) * 100 : 0;
-    const pnlP   = Math.abs(pnlPct) > 0.01 ? pnlPct.toFixed(1) : '\u2013';
-    const poids  = totalVal > 0 ? ((val / totalVal) * 100).toFixed(1) : '\u2013';
-    const pc     = pnl >= 0 ? 'perf-pos' : 'perf-neg';
-    const pcT    = pnlPct >= 0 ? 'perf-pos' : 'perf-neg';
-    const displayName = a.name || a.ticker || '\u2013';
-    const pnlSign = pnl >= 0 ? '+' : '';
-    const pctSign = pnlPct >= 0 ? '+' : '';
-    return `<tr>
-      <td><div class="asset-name">${displayName} <span class="asset-badge">${typeLabels[a.type]||''}</span></div></td>
-      <td class="portfolio-col-source" style="color:var(--muted2);font-size:12px;">${a.source||'manuel'}</td>
-      <td>${fmt.format(val)}</td>
-      <td class="${pc}">${pnlSign}${fmt.format(pnl)}</td>
-      <td class="${pcT}">${pctSign}${pnlP}%</td>
-      <td class="portfolio-col-jour">${fmtPct(a.perf1d)}</td>
-      <td class="portfolio-col-hebdo">${fmtPct(a.perfW)}</td>
-      <td class="portfolio-col-mois">${fmtPct(a.perfM)}</td>
-      <td class="portfolio-col-ytd">${fmtPct(a.perfYtd)}</td>
-      <td class="${pcT}">${pctSign}${pnlP}%</td>
-      <td style="color:var(--muted2);">${poids}%</td>
-    </tr>`;
-  }).join('');
-}
-
-let chartAssetInstance = null;
-let currentAssetPeriod = 'YTD';
-
-function setAssetPeriod(period, btn) {
-  currentAssetPeriod = period;
-  document.querySelectorAll('#page-portfolio .period-btn').forEach(b => b.classList.remove('active', 'active-default'));
-  if (btn) btn.classList.add('active');
-  renderAssetChart();
-}
-
-function renderAssetChart() {
-  if (!assets.length) return;
-
-  const ctx = document.getElementById('chartAsset');
-  if (!ctx) return;
-  if (chartAssetInstance) { chartAssetInstance.destroy(); chartAssetInstance = null; }
-
-  const selectEl  = document.getElementById('assetChartSelect');
-  const valEl     = document.getElementById('assetChartVal');
-  const deltaEl   = document.getElementById('assetChartDelta');
-  const sparkEl   = document.getElementById('assetSparklines');
-  const period    = currentAssetPeriod;
-
-  // Populate select if not done yet
-  if (selectEl && selectEl.options.length <= 1) {
-    assets.forEach((a, i) => {
-      const opt = document.createElement('option');
-      opt.value = i; opt.textContent = a.name || a.ticker || 'Actif ' + i;
-      selectEl.appendChild(opt);
-    });
-  }
-
-  const selectedIdx = selectEl ? parseInt(selectEl.value) : NaN;
-  const isGlobal    = isNaN(selectedIdx) || selectEl?.value === '__global__';
-
-  // Total portfolio or single asset
-  const totalVal = assets.reduce((s, a) => s + assetValue(a), 0);
-  const totalCost = assets.reduce((s, a) => s + assetCost(a), 0);
-
-  // Pick perf for the chosen period
-  const getPerfRatio = (a) => {
-    // Returns a raw ratio or % value depending on what the sheet sent
-    const raw = period === '1J'  ? a.perf1d
-              : period === '7J'  ? a.perfW
-              : period === '1M'  ? a.perfM
-              : period === 'YTD' ? a.perfYtd
-              : a.perfTotal;
-    return raw || 0;
-  };
-
-  const normPct = (v) => {
-    if (!v || isNaN(v)) return 0;
-    return Math.abs(v) <= 2 ? v * 100 : v;
-  };
-
-  // Build bar chart data — top 10 by value
-  const displayAssets = isGlobal
-    ? [...assets].sort((a, b) => assetValue(b) - assetValue(a)).slice(0, 12)
-    : [assets[selectedIdx]].filter(Boolean);
-
-  const labels = displayAssets.map(a => (a.ticker || a.name || '?').replace(/\s*\(.*?\)\s*/, '').substring(0, 12));
-  const perfData = displayAssets.map(a => parseFloat(normPct(getPerfRatio(a)).toFixed(1)));
-  const bgColors = perfData.map(v => v >= 0 ? 'rgba(34,197,94,0.75)' : 'rgba(239,68,68,0.75)');
-  const mutedCol = getCssVar('--muted2') || '#71717a';
-  const textCol  = getCssVar('--text')   || '#f0f2f5';
-  const gridCol  = getCssVar('--border') || 'rgba(255,255,255,0.06)';
-
-  // Display total value and global perf
-  if (isGlobal) {
-    const globalPnl  = totalVal - totalCost;
-    const globalPct  = totalCost > 0 ? (globalPnl / totalCost * 100).toFixed(1) : '0';
-    if (valEl)   valEl.textContent   = fmt.format(totalVal);
-    if (deltaEl) {
-      const sign = globalPnl >= 0 ? '+' : '';
-      deltaEl.innerHTML = `<span style="color:${globalPnl >= 0 ? 'var(--green)' : 'var(--danger)'};">${sign}${fmt.format(globalPnl)} (${sign}${globalPct}%)</span>`;
+    /* ── LIGHT MODE ── */
+    [data-theme="light"] {
+      --bg:       #f4f5f7;
+      --surface:  #ffffff;
+      --surface2: #f0f1f4;
+      --surface3: #e8eaef;
+      --border:   rgba(0,0,0,0.08);
+      --border2:  rgba(0,0,0,0.14);
+      --accent:   #7c3aed;
+      --accent2:  #8b5cf6;
+      --green:    #16a34a;
+      --text:     #0f172a;
+      --muted:    #94a3b8;
+      --muted2:   #64748b;
+      --red:      #dc2626; --danger: #dc2626;
+      --gold:     #d97706;
     }
-  } else {
-    const a = assets[selectedIdx];
-    if (a) {
-      const v = assetValue(a), c = assetCost(a), pnl = v - c;
-      const pct = normPct(getPerfRatio(a));
-      if (valEl) valEl.textContent = fmt.format(v);
-      if (deltaEl) {
-        const sign = pnl >= 0 ? '+' : '';
-        deltaEl.innerHTML = `<span style="color:${pnl >= 0 ? 'var(--green)' : 'var(--danger)'};">${sign}${fmt.format(pnl)} (${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%)</span>`;
+    [data-theme="light"] body::before {
+      background:
+        radial-gradient(ellipse 60% 50% at 5% 5%, rgba(99,102,241,0.06) 0%, transparent 60%),
+        radial-gradient(ellipse 40% 60% at 95% 95%, rgba(139,92,246,0.04) 0%, transparent 60%);
+    }
+    [data-theme="light"] body::after {
+      background-image:
+        linear-gradient(rgba(99,102,241,0.02) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(99,102,241,0.02) 1px, transparent 1px);
+    }
+
+    body {
+      font-family: 'Aptos', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-weight: 400;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      overflow-x: hidden;
+      width: 100%;
+    }
+
+    /* Blue ambient glow */
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background:
+        radial-gradient(ellipse 60% 50% at 5% 5%, rgba(37,99,235,0.1) 0%, transparent 60%),
+        radial-gradient(ellipse 40% 60% at 95% 95%, rgba(29,78,216,0.07) 0%, transparent 60%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* Subtle blue grid */
+    body::after {
+      content: '';
+      position: fixed; inset: 0;
+      background-image:
+        linear-gradient(rgba(59,130,246,0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(59,130,246,0.025) 1px, transparent 1px);
+      background-size: 50px 50px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── SIDEBAR ── */
+    .sidebar {
+      width: var(--sidebar);
+      overscroll-behavior: contain;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      padding: 24px 0;
+      position: fixed;
+      top: 0; left: 0; bottom: 0;
+      z-index: 100;
+      transition: transform 0.3s ease;
+    }
+
+    .sidebar-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 20px 24px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .brand-icon {
+      width: 34px; height: 34px;
+      background: linear-gradient(135deg,#1d4ed8,#3b82f6);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px; flex-shrink: 0;
+    }
+
+    .brand-name {
+      font-family: 'Aptos', 'Inter', sans-serif;
+      font-weight: 600;
+      font-size: 17px;
+    }
+
+    .brand-name span {  }
+
+    nav { padding: 16px 12px; flex: 1; }
+
+    .nav-section-title {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--muted);
+      padding: 0 8px;
+      margin: 12px 0 6px;
+    }
+
+    .nav-item {
+      display: flex;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.15s;
+      color: var(--muted2);
+      font-size: 13.5px;
+      font-weight: 500;
+      margin-bottom: 2px;
+      border: none;
+      background: none;
+      width: 100%;
+      text-align: left;
+    }
+
+    .nav-item:hover { background: var(--surface2); color: var(--text); }
+
+    .nav-item.active {
+      background: rgba(139,92,246,0.10);
+      
+    }
+
+    .nav-item .icon { font-size: 16px; width: 20px; text-align: center; }
+
+    .sidebar-footer {
+      padding: 16px 20px;
+      border-top: 1px solid var(--border);
+    }
+
+    .user-pill {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .user-avatar {
+      width: 32px; height: 32px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-family: 'Aptos', 'Inter', sans-serif;
+      font-weight: 600;
+      font-size: 13px;
+      color: #060810;
+      flex-shrink: 0;
+    }
+
+    .user-info { flex: 1; min-width: 0; }
+    .user-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .user-sub { font-size: 11px; color: var(--muted); }
+
+    .logout-btn {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 16px;
+      transition: color 0.2s;
+    }
+    .logout-btn:hover { color: var(--danger); }
+
+    /* ── MAIN ── */
+    .main {
+      margin-left: var(--sidebar);
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      width: calc(100% - var(--sidebar));
+      max-width: calc(100% - var(--sidebar));
+      overflow-x: hidden;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px 32px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+
+    .topbar-title {
+      font-family: 'Aptos', 'Inter', sans-serif;
+      font-size: 20px;
+      font-weight: 600;
+    }
+
+    .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .refresh-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--muted2);
+      padding: 7px 14px;
+      border-radius: 8px;
+      font-size: 12px;
+      cursor: pointer;
+      font-family: 'Aptos', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-weight: 400;
+      transition: all 0.2s;
+    }
+
+    .refresh-btn:hover { border-color: var(--border2); }
+
+    .last-update { font-size: 11px; color: var(--muted); }
+
+    /* ── CONTENT ── */
+    .content { padding: 28px 32px; }
+
+    /* ── PAGE SECTIONS ── */
+    .page-section { display: none; }
+    .page-section.active { display: block; }
+
+    /* ── KPI GRID ── */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .kpi-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      transition: border-color 0.2s;
+      animation: fadeIn 0.4s ease both;
+    }
+
+    .kpi-card:hover { border-color: var(--border2); }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .kpi-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    .kpi-value {
+      font-family: 'Aptos', 'Inter', sans-serif;
+      font-size: 24px;
+      font-weight: 600;
+      letter-spacing: -0.5px;
+    }
+
+    .kpi-sub {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 4px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 7px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .badge-up { background: rgba(34,197,94,0.12); color: #22c55e; }
+    .badge-down { background: rgba(248,113,113,0.15); color: var(--danger); }
+    .badge-neutral { background: rgba(107,114,128,0.2); color: var(--muted2); }
+
+    /* ── GRID LAYOUT ── */
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+    .grid-13 { display: grid; grid-template-columns: 1fr 2fr; gap: 16px; margin-bottom: 24px; }
+    .grid-31 { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 24px; }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+
+    .panel-title {
+      font-family: 'Aptos', 'Inter', sans-serif;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .panel-action {
+      font-size: 12px;
+      
+      cursor: pointer;
+      border: none;
+      background: none;
+      font-family: 'Aptos', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-weight: 400;
+    }
+
+    /* ── CHART CONTAINERS ── */
+    .chart-wrap { position: relative; height: 220px; }
+    .chart-wrap-lg { position: relative; height: 280px; }
+
+    /* ── TABLE ── */
+    .data-table { width: 100%; border-collapse: collapse; }
+    .data-table th {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--muted);
+      padding: 0 12px 10px;
+      text-align: left;
+      font-weight: 500;
+    }
+    .data-table th:last-child, .data-table td:last-child { text-align: right; }
+
+    .data-table td {
+      padding: 10px 12px;
+      font-size: 13.5px;
+      border-top: 1px solid var(--border);
+    }
+
+    .data-table tr:hover td { background: var(--surface2); }
+
+    .asset-name { display: flex; align-items: center; gap: 8px; }
+
+    .asset-badge {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+
+    .badge-stock { background: rgba(96,165,250,0.15); color: var(--blue); }
+    .badge-crypto { background: rgba(251,191,36,0.15); color: var(--gold); }
+    .badge-savings { background: rgba(90,242,200,0.15); color: var(--accent2); }
+    .badge-esop { background: rgba(59,130,246,0.1);  }
+
+    /* ── PROGRESS BAR ── */
+    .progress-wrap { margin-bottom: 12px; }
+    .progress-header { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted2); margin-bottom: 4px; }
+    .progress-bar { height: 6px; background: var(--surface2); border-radius: 3px; overflow: hidden; }
+    .progress-fill { height: 100%; border-radius: 3px; transition: width 0.8s ease; }
+
+    /* ── FORMS / INPUTS ── */
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .form-full { grid-column: 1 / -1; }
+
+    .field-group { margin-bottom: 14px; }
+    .field-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; display: block; }
+
+    .field-input {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 9px 12px;
+      color: var(--text);
+      font-family: 'Aptos', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-weight: 400;
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .field-input:focus { border-color: var(--accent); }
+    .field-input option { background: var(--surface2); }
+
+    .btn {
+      padding: 9px 18px;
+      border-radius: 8px;
+      border: none;
+      font-family: 'Aptos', 'Inter', sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-accent { background: linear-gradient(135deg,#1d4ed8,#3b82f6); color: #060810; }
+    .btn-accent:hover { box-shadow: 0 4px 16px rgba(59,130,246,0.35); transform: translateY(-1px); }
+    .btn-ghost { background: var(--surface2); color: var(--muted2); border: 1px solid var(--border); }
+    .btn-ghost:hover { border-color: var(--border2); color: var(--text); }
+    .btn-danger { background: rgba(248,113,113,0.15); color: var(--danger); border: 1px solid rgba(248,113,113,0.2); }
+
+    /* ── TAGS ── */
+    .tag-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .tag {
+      padding: 3px 10px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      border: 1px solid;
+    }
+
+    /* ── SALARY / SAVINGS RATE ── */
+    .rate-circle {
+      width: 100px; height: 100px;
+      border-radius: 50%;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      border: 3px solid var(--accent);
+      background: rgba(59,130,246,0.05);
+    }
+
+    .rate-circle .rate-val {
+      font-family: 'Aptos', 'Inter', sans-serif;
+      font-size: 24px;
+      font-weight: 600;
+      
+    }
+
+    .rate-circle .rate-label { font-size: 10px; color: var(--muted); }
+
+    /* ── PROJECTION ── */
+    .projection-slider { width: 100%; accent- cursor: pointer; }
+
+    /* ── FEES SCANNER ── */
+    .fee-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .fee-item:last-child { border-bottom: none; }
+
+    .fee-score {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    /* ── MODAL ── */
+    .modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.7);
+      backdrop-filter: blur(6px);
+      z-index: 200;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .modal-overlay.open { display: flex; }
+
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border2);
+      border-radius: 8px;
+      padding: 28px;
+      width: 100%;
+      max-width: 480px;
+      animation: fadeUp 0.3s ease both;
+    }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .modal-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 20px;
+    }
+
+    .modal-title { font-family: 'Aptos', 'Inter', sans-serif; font-size: 17px; font-weight: 600; }
+
+    .close-btn {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--muted2);
+      width: 28px; height: 28px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      display: flex; align-items: center; justify-content: center;
+    }
+
+    .hamburger {
+      display: none;
+      background: none;
+      border: none;
+      color: var(--text);
+      font-size: 22px;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 6px;
+      line-height: 1;
+    }
+    .hamburger:hover { background: var(--surface2); }
+
+    .sidebar-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.55);
+      z-index: 99;
+    }
+
+    /* ── PWA / MOBILE SAFE AREAS ── */
+    body {
+      padding-top: env(safe-area-inset-top);
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+
+    /* Bottom nav for mobile PWA */
+    .mobile-nav {
+      display: none;
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      padding: 8px 0 calc(8px + env(safe-area-inset-bottom));
+      z-index: 200;
+      justify-content: space-around;
+    }
+
+    .mobile-nav-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      padding: 4px 8px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 9px;
+      color: var(--muted);
+      border: none;
+      background: none;
+      transition: color 0.2s;
+      min-width: 52px;
+    }
+
+    .mobile-nav-item.active {  }
+    .mobile-nav-item .mn-icon { font-size: 20px; }
+
+    /* ══════════════════════════════════════════
+       RESPONSIVE — breakpoints adaptatifs
+       1280px+ : desktop large
+       1024px  : desktop normal
+        900px  : tablet landscape / small laptop
+        768px  : tablet portrait
+        480px  : mobile large
+        360px  : mobile small
+    ══════════════════════════════════════════ */
+
+    /* Tablet landscape (900-1024px) : sidebar rétractée, 2 colonnes max */
+    @media (max-width: 1024px) {
+      :root { --sidebar: 200px; }
+      .content { padding: 22px 24px; }
+      .kpi-grid { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+      .grid-3 { grid-template-columns: 1fr 1fr; }
+    }
+
+    /* Tablet portrait + mobile large (≤ 900px) : sidebar en drawer */
+    @media (max-width: 900px) {
+      :root { --sidebar: 260px; }
+      .mobile-nav { display: flex; }
+      .main { padding-bottom: 72px; margin-left: 0 !important; width: 100% !important; max-width: 100% !important; }
+      .sidebar { transform: translateX(-100%); box-shadow: none; }
+      .sidebar.open { transform: translateX(0); box-shadow: 4px 0 32px rgba(0,0,0,0.4); }
+      .sidebar-overlay.open { display: block !important; }
+      .hamburger { display: flex !important; }
+      .grid-2, .grid-3, .grid-13, .grid-31 { grid-template-columns: 1fr; }
+      .kpi-grid { grid-template-columns: 1fr 1fr; }
+      .content { padding: 18px 16px; }
+      .topbar { padding: 14px 16px; }
+      .form-grid { grid-template-columns: 1fr; }
+      .topbar-title { font-size: 17px; }
+      .panel { padding: 16px; }
+      .data-table th, .data-table td { padding: 8px 8px; font-size: 12px; }
+      .sort-btn { font-size: 10px; padding: 4px 8px; }
+      .chart-wrap { height: 180px; }
+      .chart-wrap-lg { height: 220px; }
+    }
+
+    /* Mobile large (≤ 600px) */
+    @media (max-width: 600px) {
+      .kpi-grid { grid-template-columns: 1fr 1fr; }
+      .kpi-card { padding: 14px; }
+      .kpi-value { font-size: 20px; }
+      #kpi-total { font-size: 30px !important; }
+      .content { padding: 14px 12px; }
+      .topbar { padding: 12px 14px; }
+      .topbar-right { gap: 6px; }
+      .refresh-btn { padding: 6px 10px; font-size: 11px; }
+      .btn.btn-accent { padding: 6px 12px; font-size: 11px; }
+      .cat-card { padding: 12px 14px; }
+      .panel-title { font-size: 13px; }
+      .fiscal-profiles { grid-template-columns: repeat(3, 1fr); }
+      /* Table portfolio : masquer colonnes secondaires */
+      .portfolio-col-jour,
+      .portfolio-col-hebdo,
+      .portfolio-col-mois { display: none; }
+    }
+
+    /* Mobile small (≤ 480px) */
+    @media (max-width: 480px) {
+      .kpi-grid { grid-template-columns: 1fr; }
+      .kpi-card { padding: 12px; }
+      #kpi-total { font-size: 26px !important; }
+      .topbar { padding: 10px 12px; }
+      .content { padding: 12px 10px; }
+      .modal { padding: 20px 16px; }
+      .section-title { font-size: 18px; }
+      .fiscal-profiles { grid-template-columns: repeat(2, 1fr); }
+      .region-grid { grid-template-columns: repeat(2, 1fr); }
+      /* Portfolio : garder seulement l'essentiel */
+      .portfolio-col-ytd { display: none; }
+    }
+
+    /* Very small (≤ 360px) */
+    @media (max-width: 360px) {
+      .content { padding: 10px 8px; }
+      .topbar-title { font-size: 15px; }
+      .brand-name { font-size: 15px; }
+    }
+
+    /* Large screens (≥ 1400px) : wider sidebar */
+    @media (min-width: 1400px) {
+      :root { --sidebar: 240px; }
+      .content { padding: 32px 40px; }
+    }
+
+    /* ── SPLASH SCREEN ── */
+    .splash {
+      position: fixed; inset: 0;
+      background: var(--bg);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      z-index: 9999;
+      transition: opacity 0.4s ease;
+    }
+    .splash.hidden { opacity: 0; pointer-events: none; }
+    .splash-logo { font-size: 60px; margin-bottom: 16px; }
+    .splash-name { font-family: 'Aptos', 'Inter', sans-serif; font-size: 24px; font-weight: 600; color: var(--text); }
+    .splash-sub { color: var(--muted); font-size: 13px; margin-top: 6px; }
+
+    /* ── SORT BUTTONS ── */
+    .sort-btn {
+      padding: 5px 10px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--muted);
+      font-size: 11px;
+      font-family: 'Aptos', 'Inter', sans-serif;
+      font-weight: 400;
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .sort-btn:hover { border-color: var(--accent2); }
+    .sort-btn.active {
+      background: rgba(59,130,246,0.15);
+      border-color: var(--accent2);
+      color: var(--accent2);
+      font-weight: 500;
+    }
+
+    /* Perf cell coloring */
+    .perf-pos { color: #22c55e; font-weight: 500; }
+    .perf-neg { color: #ef4444; font-weight: 500; }
+    .perf-zero { color: var(--muted); }
+    .period-btn {
+      padding: 6px 14px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 400;
+      font-family: 'Aptos', 'Inter', sans-serif;
+      cursor: pointer;
+      transition: all 0.2s;
+      letter-spacing: 0.3px;
+    }
+    .period-btn:hover { border-color: var(--accent2); }
+    .period-btn.active, .period-btn.active-default {
+      background: rgba(59,130,246,0.15);
+      border-color: var(--accent2);
+      color: var(--accent2);
+      font-weight: 500;
+    }
+
+    /* Tooltip crosshair */
+    #chartTooltip {
+      position: absolute;
+      background: var(--surface2);
+      border: 1px solid var(--border2);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 12px;
+      pointer-events: none;
+      display: none;
+      z-index: 10;
+      white-space: nowrap;
+    }
+    /* ── STAT CELLS ── */
+    .stat-cell { background:var(--surface); padding:16px 18px; }
+    .stat-label { font-size:11px; font-weight:500; color:var(--muted2); margin-bottom:6px; letter-spacing:0.3px; }
+    .stat-value { font-size:18px; font-weight:600; letter-spacing:-0.5px; color:var(--text); }
+    .stat-sub { font-size:11px; color:var(--muted2); margin-top:3px; }
+
+    /* ── CATEGORY CARDS ── */
+    .cat-card { background:var(--surface); display:flex; align-items:center; padding:16px 20px; cursor:pointer; transition:background 0.12s; gap:14px; }
+    .cat-card:hover { background:var(--surface2); }
+    .cat-icon { width:36px; height:36px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:16px; flex-shrink:0; }
+    .cat-info { flex:1; min-width:0; }
+    .cat-name { font-size:14px; font-weight:500; color:var(--text); letter-spacing:-0.1px; }
+    .cat-sub  { font-size:12px; color:var(--muted2); margin-top:2px; }
+    .cat-right { text-align:right; flex-shrink:0; }
+    .cat-val  { font-size:15px; font-weight:600; letter-spacing:-0.4px; color:var(--text); }
+    .cat-perf { font-size:12px; font-weight:500; margin-top:2px; }
+
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--muted);
+    }
+
+    .empty-state .icon { font-size: 36px; margin-bottom: 12px; }
+    .empty-state p { font-size: 13px; }
+
+    /* ── NOTIFICATIONS ── */
+    .toast {
+      position: fixed;
+      bottom: 24px; right: 24px;
+      background: var(--surface2);
+      border: 1px solid var(--border2);
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-size: 13px;
+      z-index: 1000;
+      animation: slideIn 0.3s ease;
+      max-width: 280px;
+    }
+
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(20px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+
+    .color-accent {  }
+    .color-danger { color: var(--danger); }
+    .color-gold { color: var(--gold); }
+    .color-blue { color: var(--blue); }
+    .color-muted { color: var(--muted); }
+    .fw-bold { font-weight: 600; }
+    .mt-8 { margin-top: 8px; }
+    .mt-16 { margin-top: 16px; }
+    .mb-16 { margin-bottom: 16px; }
+    .flex { display: flex; align-items: center; }
+    .flex-between { display: flex; align-items: center; justify-content: space-between; }
+    .gap-8 { gap: 8px; }
+    .gap-12 { gap: 12px; }
+    .text-sm { font-size: 13px; }
+    .text-xs { font-size: 11px; }
+    .w-full { width: 100%; }
+
+    /* Section title */
+    .section-title {
+      font-family: 'Aptos', 'Inter', sans-serif;
+      font-size: 20px;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .section-sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+
+    /* Highlight card */
+    .highlight-card {
+      background: linear-gradient(135deg, rgba(59,130,246,0.06), rgba(90,242,200,0.04));
+      border: 1px solid rgba(59,130,246,0.18);
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+
+    /* SCORE GAUGE */
+    .score-gauge { display:flex; flex-direction:column; align-items:center; gap:8px; }
+    .score-ring { width:130px; height:130px; }
+    .score-ring-bg { fill:none; stroke:var(--surface2); stroke-width:10; }
+    .score-ring-fill { fill:none; stroke-width:10; stroke-linecap:round; transition:stroke-dashoffset 1s ease; transform:rotate(-90deg); transform-origin:center; }
+    .div-criteria { display:flex; flex-direction:column; gap:12px; }
+    .div-item { display:flex; align-items:center; gap:12px; }
+    .div-item-label { flex:1.5; font-size:12px; }
+    .div-bar { flex:2; height:6px; background:var(--surface2); border-radius:3px; overflow:hidden; }
+    .div-bar-fill { height:100%; border-radius:3px; transition:width 0.8s ease; }
+    .div-item-score { font-size:12px; font-weight:600; width:36px; text-align:right; }
+    .region-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:8px; }
+    .region-card { background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:12px 14px; transition:border-color 0.2s; }
+    .region-card:hover { border-color:var(--border2); }
+    .region-flag { font-size:22px; margin-bottom:4px; }
+    .region-name { font-size:12px; font-weight:500; margin-bottom:2px; }
+    .region-pct { font-size:18px; font-weight:600; }
+    .region-amount { font-size:11px; color:var(--muted); margin-top:2px; }
+    .fiscal-profiles { display:grid; grid-template-columns:repeat(auto-fill,minmax(100px,1fr)); gap:8px; margin-bottom:16px; }
+    .fiscal-profile-btn { background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:12px 6px; text-align:center; cursor:pointer; transition:all 0.2s; }
+    .fiscal-profile-btn:hover { border-color:var(--border2); background:var(--surface3); }
+    .fiscal-profile-btn.active { border-color:var(--accent); background:rgba(139,92,246,0.1); }
+    .fiscal-profile-btn .fp-icon { font-size:20px; display:block; margin-bottom:4px; }
+    .fiscal-profile-btn .fp-label { font-size:11px; font-weight:600; color:var(--text); }
+    .fiscal-profile-btn .fp-sub { font-size:10px; color:var(--muted); margin-top:2px; }
+    .exemption-banner { background:rgba(34,197,94,0.06); border:1px solid rgba(34,197,94,0.2); border-radius:8px; padding:12px 16px; margin-bottom:16px; display:none; }
+    .exemption-banner.visible { display:block; }
+    .chart-wrap-sm { position:relative; height:160px; }
+  </style>
+</head>
+<body>
+  <!-- Sidebar overlay for mobile -->
+  <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+
+  <!-- ── SIDEBAR ── -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-icon">₩</div>
+      <div class="brand-name">Patrim<b>onia</b></div>
+    </div>
+
+    <nav>
+      <div class="nav-section-title">Vue d'ensemble</div>
+      <button class="nav-item active" onclick="navigate('overview')">
+        <span class="icon">🏠</span> Tableau de bord
+      </button>
+      <button class="nav-item" onclick="navigate('portfolio')">
+        <span class="icon">📈</span> Portefeuille
+      </button>
+
+      <div class="nav-section-title">Finances</div>
+      <button class="nav-item" onclick="navigate('savings')">
+        <span class="icon">🏦</span> Épargne bancaire
+      </button>
+      <button class="nav-item" onclick="navigate('salary')">
+        <span class="icon">💼</span> Salaire & budget
+      </button>
+
+      <div class="nav-section-title">Analyses</div>
+      <button class="nav-item" onclick="navigate('projection')">
+        <span class="icon">🚀</span> Projection DCA
+      </button>
+      <button class="nav-item" onclick="navigate('analysis')">
+        <span class="icon">🌍</span> Analyse complète
+      </button>
+      <button class="nav-item" onclick="navigate('fees')">
+        <span class="icon">🔍</span> Scanner de frais
+      </button>
+      <button class="nav-item" onclick="navigate('fiscalite')">
+        <span class="icon">🏛️</span> Fiscalité
+      </button>
+      <button class="nav-item" onclick="navigate('loan')">
+        <span class="icon">🏠</span> Simulation prêt
+      </button>
+
+      <div class="nav-section-title">Sources</div>
+      <button class="nav-item" onclick="navigate('sources')">
+        <span class="icon">🔗</span> Connexions
+      </button>
+      <button class="nav-item" onclick="navigate('settings')">
+        <span class="icon">⚙️</span> Paramètres
+      </button>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="user-pill">
+        <div class="user-avatar" id="userAvatar">D</div>
+        <div class="user-info">
+          <div class="user-name" id="userName">Utilisateur</div>
+          <div class="user-sub">Personnel</div>
+        </div>
+        <button class="logout-btn" onclick="logout()" title="Déconnexion">⏏</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ── MAIN ── -->
+  <main class="main">
+    <header class="topbar">
+      <div class="flex gap-12">
+        <button class="hamburger" onclick="toggleSidebar()">☰</button>
+        <div class="topbar-title" id="topbarTitle">Tableau de bord</div>
+      </div>
+      <div class="topbar-right">
+        <span class="last-update" id="lastUpdate">–</span>
+        <button id="themeToggleBtn" class="refresh-btn" onclick="toggleTheme()" title="Changer de thème" style="font-size:16px;padding:7px 10px;">🌙</button>
+        <button class="refresh-btn" onclick="refreshData()">↻ Actualiser</button>
+        <button class="btn btn-accent" onclick="openModal('addAsset')" style="font-size:12px;padding:7px 14px;">+ Ajouter</button>
+      </div>
+    </header>
+
+    <div class="content">
+
+      <!-- ══════════════════════════════════════
+           PAGE: OVERVIEW — Structure Finary
+      ══════════════════════════════════════ -->
+      <section class="page-section active" id="page-overview">
+
+        <!-- ── HERO : Patrimoine total + graphique pleine largeur ── -->
+        <div style="padding:0 0 24px;">
+
+          <!-- Titre + montant + variation -->
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px;">
+            <div>
+              <div id="overviewLabel" style="font-size:12px;color:var(--muted2);font-weight:500;letter-spacing:0.3px;margin-bottom:8px;">
+                Patrimoine financier
+              </div>
+              <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;">
+                <div id="kpi-total" style="font-size:40px;font-weight:600;letter-spacing:-1.5px;line-height:1;color:var(--text);">–</div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span id="chartDeltaVal" style="font-size:15px;font-weight:500;">–</span>
+                  <span id="kpi-total-pct" class="badge badge-neutral" style="font-size:12px;">–</span>
+                  <span id="chartDeltaPct" class="badge badge-neutral" style="font-size:11px;display:none;">–</span>
+                </div>
+              </div>
+            </div>
+            <!-- Actions rapides -->
+            <div style="display:flex;align-items:center;gap:8px;padding-top:4px;flex-wrap:wrap;">
+              <button id="btnToggleSavings" class="refresh-btn" onclick="toggleSavingsFilter()" title="Afficher/masquer l'épargne bancaire" style="font-size:12px;gap:5px;transition:all .2s;">🏦 Sans épargne</button>
+              <button class="refresh-btn" onclick="refreshData()">↻</button>
+              <button class="btn btn-accent" onclick="navigate('sources')" style="font-size:12px;padding:7px 14px;">+ Connecter</button>
+            </div>
+          </div>
+
+          <!-- Graphique historique pleine largeur -->
+          <div style="position:relative;height:220px;margin-bottom:12px;width:100%;">
+            <canvas id="chartHistorique" style="display:block;width:100%;height:220px;"></canvas>
+          </div>
+
+          <!-- Filtres période style Finary -->
+          <div style="display:flex;gap:4px;">
+            <button class="period-btn" onclick="setHistoPeriod('1J',this)">1J</button>
+            <button class="period-btn" onclick="setHistoPeriod('7J',this)">7J</button>
+            <button class="period-btn" onclick="setHistoPeriod('1M',this)">1M</button>
+            <button class="period-btn" onclick="setHistoPeriod('3M',this)">3M</button>
+            <button class="period-btn active-default" onclick="setHistoPeriod('YTD',this)">YTD</button>
+            <button class="period-btn" onclick="setHistoPeriod('1A',this)">1A</button>
+            <button class="period-btn" onclick="setHistoPeriod('TOUT',this)">Tout</button>
+          </div>
+        </div>
+
+        <!-- ── ACTIFS PAR CATÉGORIE (cards Finary) ── -->
+        <div style="margin-bottom:24px;">
+          <div style="font-size:12px;color:var(--muted2);font-weight:500;letter-spacing:0.3px;margin-bottom:12px;">Actifs</div>
+          <div id="categoryCards" style="display:flex;flex-direction:column;gap:1px;background:var(--border);border-radius:10px;overflow:hidden;"></div>
+        </div>
+
+        <!-- ── STATS P&L (ligne de KPIs compacte) ── -->
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:1px;background:var(--border);border-radius:10px;overflow:hidden;margin-bottom:24px;">
+          <div class="stat-cell">
+            <div class="stat-label">P&L total</div>
+            <div class="stat-value" id="kpi-pnl">–</div>
+            <div class="stat-sub" id="kpi-pnl-pct">–</div>
+          </div>
+          <div class="stat-cell">
+            <div class="stat-label">Aujourd'hui</div>
+            <div class="stat-value" id="statD1">–</div>
+            <div class="stat-sub">24h</div>
+          </div>
+          <div class="stat-cell">
+            <div class="stat-label">Cette semaine</div>
+            <div class="stat-value" id="statW1">–</div>
+            <div class="stat-sub">7 jours</div>
+          </div>
+          <div class="stat-cell">
+            <div class="stat-label">Ce mois</div>
+            <div class="stat-value" id="statM1">–</div>
+            <div class="stat-sub">30 jours</div>
+          </div>
+          <div class="stat-cell">
+            <div class="stat-label">YTD</div>
+            <div class="stat-value" id="statYtd">–</div>
+            <div class="stat-sub">Depuis janv.</div>
+          </div>
+          <div class="stat-cell">
+            <div class="stat-label">Positions</div>
+            <div class="stat-value" id="statPositions">–</div>
+            <div class="stat-sub">actifs</div>
+          </div>
+        </div>
+
+        <!-- ── LIGNE : Meilleur / Pire + Taux épargne ── -->
+        <div class="grid-2" style="margin-bottom:24px;">
+
+          <!-- Meilleure / Pire perf -->
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Performances</div>
+              <button class="panel-action" onclick="navigate('portfolio')">Voir tout →</button>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+              <div style="padding:12px;background:var(--surface2);border-radius:8px;">
+                <div style="font-size:10px;color:var(--muted2);font-weight:500;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">🏆 Meilleur</div>
+                <div style="font-size:14px;font-weight:600;" id="statBestName">–</div>
+                <div style="font-size:13px;font-weight:500;color:var(--green);margin-top:2px;" id="statBestPct">–</div>
+              </div>
+              <div style="padding:12px;background:var(--surface2);border-radius:8px;">
+                <div style="font-size:10px;color:var(--muted2);font-weight:500;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">📉 Pire</div>
+                <div style="font-size:14px;font-weight:600;" id="statWorstName">–</div>
+                <div style="font-size:13px;font-weight:500;color:var(--red);margin-top:2px;" id="statWorstPct">–</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Taux d'épargne -->
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Budget mensuel</div>
+              <button class="panel-action" onclick="navigate('salary')">Détail →</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:16px;">
+              <div style="flex-shrink:0;text-align:center;">
+                <div style="font-size:28px;font-weight:600;letter-spacing:-1px;" id="rateVal">–%</div>
+                <div style="font-size:11px;color:var(--muted2);margin-top:2px;">épargné</div>
+              </div>
+              <div style="flex:1;min-width:0;">
+                <div class="progress-wrap">
+                  <div class="progress-header"><span>Salaire net</span><span id="salaryDisplay">–</span></div>
+                  <div class="progress-bar"><div class="progress-fill" style="background:var(--muted2);width:100%"></div></div>
+                </div>
+                <div class="progress-wrap">
+                  <div class="progress-header"><span>Épargné</span><span id="savingsDisplay">–</span></div>
+                  <div class="progress-bar"><div class="progress-fill" id="savingsBar" style="background:var(--green);width:0%"></div></div>
+                </div>
+                <div class="progress-wrap">
+                  <div class="progress-header"><span>Dépenses</span><span id="expensesDisplay">–</span></div>
+                  <div class="progress-bar"><div class="progress-fill" id="expensesBar" style="background:var(--red);width:0%"></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── DIVIDENDES ── -->
+        <div class="panel" style="margin-bottom:24px;">
+          <div class="panel-header">
+            <div class="panel-title">Dividendes reçus</div>
+            <button class="panel-action" onclick="navigate('portfolio')">Historique →</button>
+          </div>
+          <div id="dividendsOverview"></div>
+        </div>
+
+      </section>
+
+      <!-- ══════════════════════════════════════
+           PAGE: PORTFOLIO
+      ══════════════════════════════════════ -->
+      <section class="page-section" id="page-portfolio">
+        <div class="section-title">Portefeuille</div>
+        <div class="section-sub">Tous vos actifs consolidés</div>
+
+        <!-- Graphique par actif -->
+        <div class="panel" style="margin-bottom:24px;">
+          <div class="panel-header">
+            <div class="panel-title">📊 Performance par actif</div>
+            <select class="field-input" id="assetChartSelect" style="width:auto;padding:5px 10px;font-size:12px;" onchange="renderAssetChart()">
+              <option value="__global__">— Vue globale —</option>
+            </select>
+          </div>
+
+          <!-- Period buttons for asset chart -->
+          <div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;">
+            <button class="period-btn" onclick="setAssetPeriod('1J',this)">1J</button>
+            <button class="period-btn" onclick="setAssetPeriod('7J',this)">7J</button>
+            <button class="period-btn" onclick="setAssetPeriod('1M',this)">1M</button>
+            <button class="period-btn active-default" onclick="setAssetPeriod('YTD',this)">YTD</button>
+            <button class="period-btn" onclick="setAssetPeriod('1A',this)">1A</button>
+            <button class="period-btn" onclick="setAssetPeriod('TOUT',this)">TOUT</button>
+          </div>
+
+          <div style="display:flex;align-items:flex-end;gap:14px;margin-bottom:16px;flex-wrap:wrap;">
+            <div id="assetChartVal" style="font-family:'Aptos','Inter',sans-serif;font-size:32px;font-weight:300;">–</div>
+            <div id="assetChartDelta" style="padding-bottom:4px;font-size:13px;">–</div>
+          </div>
+
+          <div style="position:relative;height:180px;">
+            <canvas id="chartAsset"></canvas>
+          </div>
+
+          <!-- Mini sparklines par actif -->
+          <div id="assetSparklines" style="margin-top:20px;display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;width:100%;"></div>
+        </div>
+
+        <div class="panel mb-16">
+          <div class="panel-header">
+            <div class="panel-title">Tous les actifs</div>
+          </div>
+
+          <!-- Filtres + Tri -->
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;align-items:center;">
+
+            <!-- Filtres existants -->
+            <select class="field-input" style="width:auto;padding:6px 10px;font-size:12px;" id="filterSource" onchange="renderPortfolio()">
+              <option value="all">Toutes sources</option>
+              <option value="sheets">Google Sheets</option>
+              <option value="binance">Binance</option>
+              <option value="crypto">Crypto.com</option>
+              <option value="tr">Trade Republic</option>
+              <option value="manual">Manuel</option>
+            </select>
+            <select class="field-input" style="width:auto;padding:6px 10px;font-size:12px;" id="filterType" onchange="renderPortfolio()">
+              <option value="all">Tous types</option>
+              <option value="stock">Actions/ETF</option>
+              <option value="crypto">Crypto</option>
+              <option value="savings">Épargne</option>
+              <option value="esop">ESOP/PER</option>
+            </select>
+
+            <!-- Séparateur -->
+            <div style="width:1px;height:24px;background:var(--border);margin:0 4px;"></div>
+
+            <!-- Tri par performance -->
+            <span style="font-size:11px;color:var(--muted);letter-spacing:0.5px;">TRIER PAR</span>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;">
+              <button class="sort-btn" onclick="setSortFilter('val_desc')" id="sort_val_desc">💰 Valeur ↓</button>
+              <button class="sort-btn" onclick="setSortFilter('perf_day_desc')" id="sort_perf_day_desc">☀️ Jour ↑</button>
+              <button class="sort-btn" onclick="setSortFilter('perf_day_asc')" id="sort_perf_day_asc">☀️ Jour ↓</button>
+              <button class="sort-btn" onclick="setSortFilter('perf_week_desc')" id="sort_perf_week_desc">📅 Hebdo ↑</button>
+              <button class="sort-btn" onclick="setSortFilter('perf_week_asc')" id="sort_perf_week_asc">📅 Hebdo ↓</button>
+              <button class="sort-btn" onclick="setSortFilter('perf_month_desc')" id="sort_perf_month_desc">🗓️ Mois ↑</button>
+              <button class="sort-btn" onclick="setSortFilter('perf_month_asc')" id="sort_perf_month_asc">🗓️ Mois ↓</button>
+              <button class="sort-btn" onclick="setSortFilter('perf_ytd_desc')" id="sort_perf_ytd_desc">📈 YTD ↑</button>
+              <button class="sort-btn" onclick="setSortFilter('perf_ytd_asc')" id="sort_perf_ytd_asc">📈 YTD ↓</button>
+              <button class="sort-btn" onclick="setSortFilter('perf_total_desc')" id="sort_perf_total_desc">🏆 Total ↑</button>
+              <button class="sort-btn" onclick="setSortFilter('perf_total_asc')" id="sort_perf_total_asc">🏆 Total ↓</button>
+            </div>
+          </div>
+
+          <!-- Podium top/pire performers -->
+          <div id="perfPodium" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px;margin-bottom:16px;"></div>
+
+          <div style="overflow-x:auto;max-width:100%;width:100%">
+            <table class="data-table" id="portfolioTable">
+              <thead><tr>
+                <th>Actif</th>
+                <th class="portfolio-col-source">Source</th>
+                <th>Valeur</th>
+                <th>P&amp;L (€)</th>
+                <th>P&amp;L (%)</th>
+                <th class="portfolio-col-jour">Jour</th>
+                <th class="portfolio-col-hebdo">Hebdo</th>
+                <th class="portfolio-col-mois">Mois</th>
+                <th class="portfolio-col-ytd">YTD</th>
+                <th>Total</th>
+                <th>Poids</th>
+              </tr></thead>
+              <tbody id="portfolioTbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══════════════════════════════════════
+           PAGE: SAVINGS
+      ══════════════════════════════════════ -->
+      <section class="page-section" id="page-savings">
+        <div class="section-title">Épargne bancaire</div>
+        <div class="section-sub">Livrets, comptes courants, épargne réglementée</div>
+
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <div class="kpi-label">Total épargne</div>
+            <div class="kpi-value color-blue" id="savingsTotal">–</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Intérêts estimés / an</div>
+            <div class="kpi-value color-accent" id="savingsInterests">–</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Taux moyen pondéré</div>
+            <div class="kpi-value" id="savingsAvgRate">–</div>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Mes livrets</div>
+              <button class="panel-action" onclick="openModal('addSavings')">+ Ajouter</button>
+            </div>
+            <div id="savingsList"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-header"><div class="panel-title">Répartition</div></div>
+            <div class="chart-wrap"><canvas id="chartSavings"></canvas></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══════════════════════════════════════
+           PAGE: SALARY & BUDGET
+      ══════════════════════════════════════ -->
+      <section class="page-section" id="page-salary">
+        <div class="section-title">Salaire & Budget</div>
+        <div class="section-sub">Suivi de votre taux d'épargne et de vos dépenses</div>
+
+        <div class="grid-2">
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Revenus mensuels</div>
+              <button class="panel-action" onclick="openModal('editSalary')">Modifier</button>
+            </div>
+            <div class="field-group">
+              <div class="progress-wrap">
+                <div class="progress-header"><span>Salaire brut</span><span id="grossDisplay">–</span></div>
+                <div class="progress-bar"><div class="progress-fill" style="background:var(--blue);width:100%"></div></div>
+              </div>
+              <div class="progress-wrap">
+                <div class="progress-header"><span>Salaire net</span><span id="netDisplay">–</span></div>
+                <div class="progress-bar"><div class="progress-fill" id="netBar" style="background:var(--accent2);width:80%"></div></div>
+              </div>
+            </div>
+            <div style="margin-top:16px;">
+              <div class="flex-between text-sm mb-16">
+                <span class="color-muted">Prime intéressement (annuel)</span>
+                <span id="interDisplay">–</span>
+              </div>
+              <div class="flex-between text-sm">
+                <span class="color-muted">Prime participation (annuel)</span>
+                <span id="partDisplay">–</span>
+              </div>
+              <div id="aidesDisplay"></div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-header"><div class="panel-title">Taux d'épargne mensuel</div></div>
+            <div class="flex" style="justify-content:center; padding:16px 0;">
+              <div class="rate-circle" style="width:130px;height:130px;">
+                <div class="rate-val" style="font-size:30px;" id="rateValBig">–%</div>
+                <div class="rate-label">taux épargne</div>
+              </div>
+            </div>
+            <div class="progress-wrap">
+              <div class="progress-header"><span>Épargné</span><span id="savedMonthly">–</span></div>
+              <div class="progress-bar"><div class="progress-fill" id="savedBar" style="background:var(--accent);width:0%"></div></div>
+            </div>
+            <div class="progress-wrap">
+              <div class="progress-header"><span>Dépenses fixes</span><span id="fixedExp">–</span></div>
+              <div class="progress-bar"><div class="progress-fill" id="fixedBar" style="background:var(--danger);width:0%"></div></div>
+            </div>
+            <div class="progress-wrap">
+              <div class="progress-header"><span>Disponible</span><span id="available">–</span></div>
+              <div class="progress-bar"><div class="progress-fill" id="availBar" style="background:var(--gold);width:0%"></div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">Dépenses fixes mensuelles</div>
+            <button class="panel-action" onclick="openModal('addExpense')">+ Ajouter</button>
+          </div>
+          <div id="expensesList"></div>
+        </div>
+      </section>
+
+      <!-- ══════════════════════════════════════
+           PAGE: PROJECTION DCA
+      ══════════════════════════════════════ -->
+      <section class="page-section" id="page-projection">
+        <div class="section-title">Projection DCA</div>
+        <div class="section-sub">Simulez l'évolution de votre patrimoine</div>
+
+        <div class="highlight-card">
+          <div class="flex-between" style="flex-wrap:wrap; gap:16px;">
+            <div>
+              <div class="kpi-label">Valeur finale projetée</div>
+              <div class="kpi-value color-accent" id="projectedValue">–</div>
+              <div class="text-xs color-muted mt-8" id="projectionMeta">–</div>
+            </div>
+            <div style="text-align:right;">
+              <div class="kpi-label">Gains estimés</div>
+              <div class="kpi-value" id="projectedGains">–</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="panel">
+            <div class="panel-header"><div class="panel-title">Paramètres de simulation</div></div>
+
+            <div class="field-group">
+              <label class="field-label">Capital de départ (€)</label>
+              <input class="field-input" type="number" id="projStartCapital" value="0" oninput="updateProjection()">
+            </div>
+            <div class="field-group">
+              <label class="field-label">DCA mensuel (€)</label>
+              <input class="field-input" type="number" id="projMonthly" value="500" oninput="updateProjection()">
+            </div>
+            <div class="field-group">
+              <label class="field-label">Rendement annuel moyen (%)</label>
+              <input class="field-input" type="range" id="projRate" min="1" max="20" value="8" class="projection-slider" oninput="document.getElementById('projRateLabel').textContent=this.value+'%'; updateProjection()">
+              <div class="flex-between text-xs color-muted mt-8"><span>1%</span><span id="projRateLabel">8%</span><span>20%</span></div>
+            </div>
+            <div class="field-group">
+              <label class="field-label">Durée (années)</label>
+              <input class="field-input" type="range" id="projYears" min="1" max="40" value="20" class="projection-slider" oninput="document.getElementById('projYearsLabel').textContent=this.value+' ans'; updateProjection()">
+              <div class="flex-between text-xs color-muted mt-8"><span>1 an</span><span id="projYearsLabel">20 ans</span><span>40 ans</span></div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-header"><div class="panel-title">Courbe de croissance</div></div>
+            <div class="chart-wrap-lg"><canvas id="chartProjection"></canvas></div>
+          </div>
+        </div>
+
+        <!-- Milestones -->
+        <div class="panel">
+          <div class="panel-header"><div class="panel-title">Jalons</div></div>
+          <div id="milestones" class="flex" style="flex-wrap:wrap; gap:12px;"></div>
+        </div>
+      </section>
+
+      <!-- ══════════════════════════════════════
+           PAGE: ANALYSIS
+      ══════════════════════════════════════ -->
+      <section class="page-section" id="page-analysis">
+        <div class="section-title">Analyse complète</div>
+        <div class="section-sub">Géographie, sectorielle, exposition et surexpositions</div>
+
+        <!-- Score de diversification -->
+        <div class="grid-13" style="margin-bottom:24px;">
+          <div class="panel">
+            <div class="panel-header"><div class="panel-title">🎯 Score de diversification</div><span id="scoreBadge" class="badge badge-neutral">–</span></div>
+            <div class="score-gauge">
+              <svg class="score-ring" viewBox="0 0 130 130">
+                <circle class="score-ring-bg" cx="65" cy="65" r="55"/>
+                <circle id="scoreRingFill" class="score-ring-fill" cx="65" cy="65" r="55" stroke-dasharray="346" stroke-dashoffset="346"/>
+                <text id="scoreSvgText" x="65" y="70" text-anchor="middle" font-size="26" font-weight="600" fill="#f0f2f5">–</text>
+              </svg>
+            </div>
+            <div id="scoreDetails" class="div-criteria mt-8"></div>
+            <div id="scoreRecos" style="margin-top:16px;"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-header"><div class="panel-title">🗺️ Carte géographique</div></div>
+            <div id="regionHeatmap" class="region-grid"></div>
+          </div>
+        </div>
+
+        <div class="grid-3">
+          <div class="panel">
+            <div class="panel-header"><div class="panel-title">🌍 Géographie</div></div>
+            <div class="chart-wrap"><canvas id="chartGeo"></canvas></div>
+          </div>
+          <div class="panel">
+            <div class="panel-header"><div class="panel-title">🏭 Secteurs</div></div>
+            <div class="chart-wrap"><canvas id="chartSector"></canvas></div>
+          </div>
+          <div class="panel">
+            <div class="panel-header"><div class="panel-title">💱 Devises</div></div>
+            <div class="chart-wrap"><canvas id="chartCurrency"></canvas></div>
+          </div>
+        </div>
+
+        <div class="grid-2" style="margin-top:16px;">
+          <div class="panel">
+            <div class="panel-header"><div class="panel-title">📊 Allocation par classe</div></div>
+            <div class="chart-wrap"><canvas id="chartAllocation"></canvas></div>
+          </div>
+          <div class="panel">
+            <div class="panel-header"><div class="panel-title">🔗 Par source</div></div>
+            <div class="chart-wrap"><canvas id="chartSource"></canvas></div>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-top:16px;">
+          <div class="panel-header"><div class="panel-title">⚠️ Alertes de concentration</div></div>
+          <div id="concentrationAlerts"></div>
+        </div>
+      </section>
+
+      <!-- ══════════════════════════════════════
+           PAGE: FEES
+      ══════════════════════════════════════ -->
+      <section class="page-section" id="page-fees">
+        <div class="section-title">Scanner de frais</div>
+        <div class="section-sub">Identifiez et optimisez vos coûts cachés</div>
+
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <div class="kpi-label">Frais totaux / an</div>
+            <div class="kpi-value color-danger" id="feeTotal">–</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Impact sur 20 ans</div>
+            <div class="kpi-value color-gold" id="feeImpact">–</div>
+            <div class="kpi-sub">Coût d'opportunité</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Score d'optimisation</div>
+            <div class="kpi-value color-accent" id="feeScore">–/10</div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header"><div class="panel-title">Analyse par plateforme</div></div>
+          <div id="feesBreakdown"></div>
+        </div>
+      </section>
+
+      <!-- ══════════════════════════════════════
+           PAGE: SOURCES
+      ══════════════════════════════════════ -->
+      <section class="page-section" id="page-sources">
+        <div class="section-title">Connexions</div>
+        <div class="section-sub">Gérez vos sources de données</div>
+
+        <div class="grid-2">
+          <!-- Google Sheets -->
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">📊 Google Sheets</div>
+              <span id="sheetsStatus" class="badge badge-neutral">Non connecté</span>
+            </div>
+
+            <!-- Étape 1 : Clé API -->
+            <div style="background:rgba(96,165,250,0.06);border:1px solid rgba(96,165,250,0.15);border-radius:10px;padding:12px;margin-bottom:14px;">
+              <div style="font-size:11px;color:var(--blue);font-weight:700;margin-bottom:6px;">🔑 Étape 1 — Créer une clé API Google</div>
+              <div class="text-xs color-muted" style="line-height:1.6;">
+                1. Va sur <a href="https://console.cloud.google.com" target="_blank" style="color:var(--accent2)">console.cloud.google.com</a><br>
+                2. Crée un projet → <b>APIs & Services → Credentials</b><br>
+                3. <b>Create credentials → API Key</b><br>
+                4. Active <b>Google Sheets API</b> dans le projet<br>
+                5. Colle la clé ci-dessous (commence par <code style="color:var(--accent)">AIza...</code>)
+              </div>
+            </div>
+
+            <div class="field-group">
+              <label class="field-label">Clé API Google (AIza...)</label>
+              <input class="field-input" id="sheetsApiKey" type="password" placeholder="AIzaSy..." />
+            </div>
+
+            <div class="field-group">
+              <label class="field-label">URL de votre Google Sheet</label>
+              <input class="field-input" id="sheetsUrl" placeholder="https://docs.google.com/spreadsheets/d/..." />
+            </div>
+
+            <!-- Structure détectée -->
+            <div id="dashboardDetected" style="display:none;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.1);border-radius:10px;padding:10px;margin-bottom:12px;">
+              <div style="font-size:11px;color:var(--accent);font-weight:700;margin-bottom:4px;">✓ Structure DASHBOARD détectée</div>
+              <div class="text-xs color-muted">Import automatique : <span class="color-blue">CTO</span> · <span class="color-gold">Crypto</span> · <span class="color-accent">AIRBUS</span></div>
+            </div>
+
+            <!-- Mapping générique -->
+            <div class="field-group" id="genericMappingSection" style="display:none;">
+              <label class="field-label">Onglet principal (ex: Feuil1)</label>
+              <input class="field-input" id="sheetsRange" placeholder="Feuil1" />
+              <div class="form-grid" style="margin-top:8px;">
+                <div><label class="field-label">Colonne Nom</label><input class="field-input" id="colName" placeholder="A" /></div>
+                <div><label class="field-label">Colonne Quantité</label><input class="field-input" id="colQty" placeholder="B" /></div>
+                <div><label class="field-label">Colonne Prix Achat</label><input class="field-input" id="colBuy" placeholder="C" /></div>
+                <div><label class="field-label">Colonne Prix Actuel</label><input class="field-input" id="colVal" placeholder="D" /></div>
+              </div>
+            </div>
+
+            <div class="text-xs color-muted" style="margin-bottom:12px;">🔒 Votre clé API est stockée uniquement dans votre navigateur, jamais envoyée à un serveur.</div>
+            <button class="btn btn-accent w-full" id="importSheetsBtn" onclick="connectSheets()">⬇ Importer mon Google Sheet</button>
+            <div id="deleteContainer_sheets"></div>
+          </div>
+
+          <!-- Binance -->
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">🟡 Binance</div>
+              <span id="binanceStatus" class="badge badge-neutral">Non connecté</span>
+            </div>
+            <div style="background:rgba(251,191,36,0.06);border:1px solid rgba(251,191,36,0.15);border-radius:10px;padding:10px;margin-bottom:14px;">
+              <div style="font-size:11px;color:var(--gold);font-weight:700;margin-bottom:4px;">⚡ Priorité sur Google Sheets pour les cryptos</div>
+              <div class="text-xs color-muted">Prix récupérés en temps réel via CoinGecko.</div>
+            </div>
+            <div class="field-group">
+              <label class="field-label">Clé API Binance (lecture seule)</label>
+              <input class="field-input" type="password" id="binanceApiKey" placeholder="Votre clé API Binance..." />
+            </div>
+            <div class="field-group">
+              <label class="field-label">Secret API (optionnel)</label>
+              <input class="field-input" type="password" id="binanceApiSecret" placeholder="Votre secret API..." />
+            </div>
+            <div class="field-group">
+              <label class="field-label">Vos soldes (format: BTC:0.01, ETH:1.2, BNB:5)</label>
+              <input class="field-input" id="binanceManual" placeholder="BTC:0.01394, ETH:1.0368, CRO:2900" />
+            </div>
+            <div class="text-xs color-muted" style="margin-bottom:12px;">
+              💡 Créez une clé <b>lecture seule</b> sur Binance → Paramètres → Gestion des API.<br>
+              Les clés sont stockées uniquement dans votre navigateur.
+            </div>
+            <button class="btn btn-accent w-full" onclick="connectBinance()">⬇ Importer Binance</button>
+            <div id="deleteContainer_binance"></div>
+          </div>
+
+          <!-- Crypto.com -->
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">🔵 Crypto.com</div>
+              <span id="cryptoStatus" class="badge badge-neutral">Non connecté</span>
+            </div>
+            <div class="field-group">
+              <label class="field-label">Import CSV / JSON manuel</label>
+              <input class="field-input" type="file" id="cryptoFile" accept=".csv,.json" />
+            </div>
+            <div class="field-group">
+              <label class="field-label">Ou saisie manuelle du solde</label>
+              <input class="field-input" id="cryptoManual" placeholder="BTC:0.5, ETH:2.3, CRO:1000" />
+            </div>
+            <button class="btn btn-accent w-full" onclick="connectCrypto()">Importer Crypto.com</button>
+            <div id="deleteContainer_crypto"></div>
+          </div>
+
+          <!-- Trade Republic -->
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">🟢 Trade Republic</div>
+              <span id="trStatus" class="badge badge-neutral">Non connecté</span>
+            </div>
+            <div style="background:rgba(90,242,200,0.06);border:1px solid rgba(90,242,200,0.15);border-radius:10px;padding:10px;margin-bottom:14px;">
+              <div style="font-size:11px;color:var(--accent2);font-weight:700;margin-bottom:4px;">⚡ Priorité sur Google Sheets pour les actions/ETF</div>
+              <div class="text-xs color-muted">Import PDF ou CSV. Les cryptos et ESOP/Airbus ne sont pas affectés.</div>
+            </div>
+            <div class="field-group">
+              <label class="field-label">Relevé PDF ou CSV Trade Republic</label>
+              <input class="field-input" type="file" id="trFile" accept=".pdf,.csv" />
+            </div>
+            <div class="text-xs color-muted" style="margin-bottom:12px;">
+              💡 Dans l'app TR : <b>Profil → Documents → Relevé de portefeuille</b><br>
+              Accepte les PDF en français, anglais et allemand.
+            </div>
+            <button class="btn btn-accent w-full" onclick="connectTR()">⬇ Importer Trade Republic</button>
+            <div id="deleteContainer_tr"></div>
+          </div>
+        </div>
+
+        <!-- Import CSV / Excel / XLSX -->
+        <div class="panel mt-16">
+          <div class="panel-header">
+            <div class="panel-title">📂 Import fichier (CSV / Excel / XLSX)</div>
+            <span id="fileImportStatus" class="badge badge-neutral">–</span>
+          </div>
+          <div style="background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.15);border-radius:10px;padding:12px;margin-bottom:14px;">
+            <div style="font-size:11px;color:var(--green);font-weight:700;margin-bottom:6px;">📋 Format attendu (colonnes requises)</div>
+            <div class="text-xs color-muted" style="line-height:1.8;">
+              <b>CSV / Excel :</b> Ticker · Nom · Quantité · PRU · Prix actuel<br>
+              <b>Colonnes optionnelles :</b> Investi · Valeur · 1J · Hebdo · YTD · Secteur · Géo · Devise<br>
+              <b>Exemple :</b> <code style="color:var(--accent);">EPA:AIR,Airbus,10,120,171.78,1200,1717.8</code>
+            </div>
+          </div>
+          <div class="field-group">
+            <label class="field-label">Glissez ou sélectionnez votre fichier</label>
+            <div id="fileDropZone" style="border:2px dashed var(--border2);border-radius:10px;padding:28px;text-align:center;cursor:pointer;transition:all 0.2s;"
+                 onclick="document.getElementById('fileImportInput').click()"
+                 ondragover="event.preventDefault();this.style.borderColor='var(--accent)'"
+                 ondragleave="this.style.borderColor='var(--border2)'"
+                 ondrop="handleFileDrop(event)">
+              <div style="font-size:28px;margin-bottom:8px;">📁</div>
+              <div style="font-size:13px;font-weight:500;color:var(--text);">Cliquez ou glissez un fichier ici</div>
+              <div style="font-size:11px;color:var(--muted2);margin-top:4px;">.csv · .xlsx · .xls · .json acceptés</div>
+            </div>
+            <input type="file" id="fileImportInput" style="display:none" accept=".csv,.xlsx,.xls,.json" onchange="handleFileImport(event)">
+          </div>
+          <div id="fileImportPreview" style="margin-top:12px;"></div>
+          <div style="margin-top:10px;display:flex;gap:8px;">
+            <button class="btn btn-ghost" style="flex:1;" onclick="document.getElementById('fileImportInput').click()">📂 Choisir un fichier</button>
+            <button class="btn btn-accent" style="flex:1;" id="fileImportBtn" onclick="confirmFileImport()" style="display:none;">✓ Importer les actifs</button>
+          </div>
+        </div>
+
+        <!-- Manual assets -->
+        <div class="panel mt-16">
+          <div class="panel-header">
+            <div class="panel-title">✏️ Actifs manuels</div>
+            <button class="panel-action" onclick="openModal('addAsset')">+ Ajouter</button>
+          </div>
+          <div id="manualAssetsList"></div>
+        </div>
+      </section>
+
+      <!-- ══════════════════════════════════════
+           PAGE: SETTINGS
+      ══════════════════════════════════════ -->
+      <section class="page-section" id="page-settings">
+        <div class="section-title">⚙️ Paramètres</div>
+        <div class="section-sub">Configurez votre espace Patrimonia</div>
+
+        <div class="grid-2">
+          <!-- Affichage -->
+          <div class="panel">
+            <div class="panel-header"><div class="panel-title">🎨 Affichage</div></div>
+            <div class="field-group">
+              <label class="field-label">Devise principale</label>
+              <select class="field-input" id="currency">
+                <option value="EUR">EUR (€)</option>
+                <option value="USD">USD ($)</option>
+                <option value="GBP">GBP (£)</option>
+                <option value="CHF">CHF</option>
+              </select>
+            </div>
+            <div class="field-group">
+              <label class="field-label">Seuil de surexposition (%)</label>
+              <input class="field-input" type="number" id="exposureThreshold" value="20" />
+            </div>
+            <div class="field-group">
+              <label class="field-label">Thème</label>
+              <div style="display:flex;gap:8px;">
+                <button class="btn btn-ghost" style="flex:1;" onclick="applyTheme('dark')">🌙 Sombre</button>
+                <button class="btn btn-ghost" style="flex:1;" onclick="applyTheme('light')">☀ Clair</button>
+              </div>
+            </div>
+            <button class="btn btn-accent w-full" onclick="saveSettings()">Sauvegarder</button>
+          </div>
+
+          <!-- Import / Export données -->
+          <div class="panel">
+            <div class="panel-header"><div class="panel-title">💾 Données</div></div>
+            <div class="field-group" style="display:flex;flex-direction:column;gap:10px;">
+              <button class="btn btn-ghost w-full" onclick="exportData()">📥 Exporter mes données (JSON)</button>
+              <button class="btn btn-ghost w-full" onclick="importData()">📤 Importer des données (JSON)</button>
+              <input type="file" id="importFile" style="display:none" accept=".json,.xlsx,.xls,.csv" onchange="handleImport(event)">
+              <button class="btn btn-ghost w-full" onclick="forceClearCache()" style="margin-top:8px;">🔄 Vider le cache navigateur</button>
+              <button class="btn btn-danger w-full" style="margin-top:8px;" onclick="clearData()">🗑️ Réinitialiser les données locales</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Compte -->
+        <div class="panel" style="margin-top:16px;">
+          <div class="panel-header"><div class="panel-title">👤 Mon compte</div></div>
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:12px 0;border-bottom:1px solid var(--border);">
+            <div>
+              <div style="font-size:14px;font-weight:500;" id="settingsEmail">–</div>
+              <div style="font-size:12px;color:var(--muted2);">Compte connecté</div>
+            </div>
+            <button class="btn btn-ghost" onclick="logout()">🚪 Se déconnecter</button>
+          </div>
+          <div style="margin-top:20px;padding:16px;background:rgba(239,68,68,0.05);border:1px solid rgba(239,68,68,0.2);border-radius:10px;">
+            <div style="font-size:13px;font-weight:600;color:var(--danger);margin-bottom:6px;">⚠️ Zone dangereuse</div>
+            <div style="font-size:12px;color:var(--muted2);margin-bottom:12px;line-height:1.6;">
+              La suppression de votre compte est <b>irréversible</b>. Toutes vos données (actifs, budget, historique) seront définitivement effacées.
+            </div>
+            <button class="btn btn-danger" onclick="openModal('deleteAccount')" style="width:100%;">🗑️ Supprimer mon compte définitivement</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══════════════════════════════════════
+           PAGE: FISCALITÉ
+      ══════════════════════════════════════ -->
+      <section class="page-section" id="page-fiscalite">
+        <div class="section-title">🏛️ Fiscalité</div>
+        <div class="section-sub">Simulez vos impôts et optimisez votre situation fiscale</div>
+
+        <!-- Auto-fill banner -->
+        <div style="background:rgba(139,92,246,0.07);border:1px solid rgba(139,92,246,0.2);border-radius:10px;padding:10px 14px;margin-bottom:16px;display:flex;align-items:center;gap:10px;">
+          <span style="font-size:18px;">🔗</span>
+          <div style="flex:1;">
+            <div style="font-size:12px;font-weight:600;color:var(--accent2);">Données liées automatiquement</div>
+            <div style="font-size:11px;color:var(--muted2);">Salaire brut, intéressement, dividendes et versements PER sont pré-remplis depuis vos onglets Salaire & Budget et Portefeuille.</div>
+          </div>
+          <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;" onclick="autoFillFiscalFromSalary();calculateTax();showToast('Données rechargées ✓','#22c55e')">↻ Resync</button>
+        </div>
+
+        <!-- Profils fiscaux -->
+        <div class="panel" style="margin-bottom:16px;">
+          <div class="panel-header"><div class="panel-title">Mon profil</div></div>
+          <div class="fiscal-profiles">
+            <div class="fiscal-profile-btn active" onclick="selectFiscalProfile('salarie',this)">
+              <span class="fp-icon">💼</span><div class="fp-label">Salarié</div><div class="fp-sub">CDI/CDD</div>
+            </div>
+            <div class="fiscal-profile-btn" onclick="selectFiscalProfile('apprenti',this)">
+              <span class="fp-icon">🎓</span><div class="fp-label">Apprenti</div><div class="fp-sub">Alternant</div>
+            </div>
+            <div class="fiscal-profile-btn" onclick="selectFiscalProfile('etudiant',this)">
+              <span class="fp-icon">📚</span><div class="fp-label">Étudiant</div><div class="fp-sub">Job étudiant</div>
+            </div>
+            <div class="fiscal-profile-btn" onclick="selectFiscalProfile('autoentrepreneur',this)">
+              <span class="fp-icon">🏗️</span><div class="fp-label">Auto-entr.</div><div class="fp-sub">Micro</div>
+            </div>
+            <div class="fiscal-profile-btn" onclick="selectFiscalProfile('retraite',this)">
+              <span class="fp-icon">🏖️</span><div class="fp-label">Retraité</div><div class="fp-sub">Pension</div>
+            </div>
+          </div>
+          <!-- Bannière exemption -->
+          <div class="exemption-banner" id="exemptionBanner">
+            <div style="font-size:12px;font-weight:700;color:var(--green);margin-bottom:4px;" id="exemptionTitle">–</div>
+            <div style="font-size:12px;color:var(--muted2);" id="exemptionDesc">–</div>
+          </div>
+          <!-- Champs spécifiques apprenti -->
+          <div id="taxAppFieldWrap" style="display:none;margin-top:12px;">
+            <label class="field-label">Salaire apprentissage annuel (€) — exonéré jusqu'à 1 SMIC (20 815 €)</label>
+            <input class="field-input" type="number" id="taxAppSalary" placeholder="20000" oninput="calculateTax()">
+          </div>
+          <!-- Champs spécifiques étudiant -->
+          <div id="taxStudentFieldWrap" style="display:none;margin-top:12px;">
+            <label class="field-label">Revenus job étudiant annuels (€) — exonérés jusqu'à 3 SMIC (62 445 €) avant 26 ans</label>
+            <input class="field-input" type="number" id="taxStudentIncome" placeholder="10000" oninput="calculateTax()">
+          </div>
+          <!-- Champs auto-entrepreneur -->
+          <div id="taxAEFieldWrap" style="display:none;margin-top:12px;">
+            <label class="field-label">Chiffre d'affaires annuel (€)</label>
+            <input class="field-input" type="number" id="taxAERevenue" placeholder="30000" oninput="calculateTax()">
+          </div>
+        </div>
+
+        <!-- Formulaire profil fiscal -->
+        <div class="grid-2" style="margin-bottom:24px;">
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Données fiscales <span style="font-size:10px;color:var(--accent2);margin-left:6px;">🔗 Auto-sync</span></div>
+              <button class="panel-action" onclick="calculateTax()">Calculer →</button>
+            </div>
+            <div class="form-grid">
+              <div>
+                <label class="field-label">Âge</label>
+                <input class="field-input" type="number" id="taxAge" placeholder="30" oninput="calculateTax()">
+              </div>
+              <div>
+                <label class="field-label">Situation familiale</label>
+                <select class="field-input" id="taxSituation" onchange="calculateTax()">
+                  <option value="single">Célibataire</option>
+                  <option value="married">Marié(e) / PACS</option>
+                  <option value="married_children1">Marié(e) + 1 enfant</option>
+                  <option value="married_children2">Marié(e) + 2 enfants</option>
+                  <option value="married_children3">Marié(e) + 3 enfants</option>
+                  <option value="single_parent1">Parent isolé + 1 enfant</option>
+                  <option value="single_parent2">Parent isolé + 2 enfants</option>
+                </select>
+              </div>
+              <div>
+                <label class="field-label">Salaire brut annuel (€) <span style="color:var(--green);font-size:10px;">🔗 Salaire</span></label>
+                <input class="field-input" type="number" id="taxGross" placeholder="40000" oninput="calculateTax()">
+              </div>
+              <div>
+                <label class="field-label">Intéressement + participation (€) <span style="color:var(--green);font-size:10px;">🔗 Salaire</span></label>
+                <input class="field-input" type="number" id="taxOther" placeholder="0" oninput="calculateTax()">
+              </div>
+              <div>
+                <label class="field-label">Plus-values mobilières (€)</label>
+                <input class="field-input" type="number" id="taxCapGain" placeholder="0" oninput="calculateTax()">
+              </div>
+              <div>
+                <label class="field-label">Dividendes perçus (€) <span style="color:var(--green);font-size:10px;">🔗 Portefeuille</span></label>
+                <input class="field-input" type="number" id="taxDividends" placeholder="0" oninput="calculateTax()">
+              </div>
+              <div>
+                <label class="field-label">Versements PER (€/an) <span style="color:var(--green);font-size:10px;">🔗 Airbus PERCOL</span></label>
+                <input class="field-input" type="number" id="taxPer" placeholder="0" oninput="calculateTax()">
+              </div>
+              <div>
+                <label class="field-label">Dons associations (€/an)</label>
+                <input class="field-input" type="number" id="taxDons" placeholder="0" oninput="calculateTax()">
+              </div>
+            </div>
+          </div>
+
+          <!-- Résultat impôt -->
+          <div>
+            <div class="highlight-card" style="margin-bottom:16px;">
+              <div class="flex-between" style="flex-wrap:wrap;gap:12px;">
+                <div>
+                  <div class="kpi-label">Impôt sur le revenu estimé</div>
+                  <div class="kpi-value color-danger" id="taxResult">–</div>
+                  <div class="text-xs color-muted mt-8" id="taxTMI">Tranche marginale : –</div>
+                </div>
+                <div style="text-align:right;">
+                  <div class="kpi-label">Taux effectif</div>
+                  <div class="kpi-value" id="taxRate">–%</div>
+                </div>
+              </div>
+            </div>
+            <!-- Exemption banner -->
+            <div id="taxExemptionResult" style="display:none;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.2);border-radius:8px;padding:12px;margin-bottom:16px;">
+              <div style="font-size:12px;font-weight:700;color:var(--green);margin-bottom:4px;">✓ Exonération applicable</div>
+              <div style="font-size:12px;color:var(--muted2);" id="taxExemptionDetail"></div>
+            </div>
+            <div class="panel" style="margin-bottom:16px;">
+              <div class="panel-header"><div class="panel-title">Décomposition</div></div>
+              <div id="taxBreakdown"></div>
+            </div>
+            <div class="panel">
+              <div class="panel-header"><div class="panel-title">Flat Tax vs Barème</div></div>
+              <div id="taxFlatvsBareme"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Optimisations -->
+        <div class="panel" style="margin-bottom:24px;">
+          <div class="panel-header"><div class="panel-title">💡 Optimisations fiscales personnalisées</div></div>
+          <div id="taxOptimizations"></div>
+        </div>
+
+        <!-- Enveloppes fiscales -->
+        <div class="grid-3">
+          <div class="panel">
+            <div class="panel-header"><div class="panel-title">📗 PEA</div></div>
+            <div class="text-xs color-muted" style="line-height:1.7;margin-bottom:12px;">
+              <b style="color:var(--accent)">Avantage :</b> Plus-values et dividendes <b>exonérés d'IR</b> après 5 ans (seulement 17.2% prélèvements sociaux)<br>
+              <b style="color:var(--accent)">Plafond :</b> 150 000 € de versements<br>
+              <b style="color:var(--accent)">Idéal pour :</b> ETF monde, actions européennes
+            </div>
+            <div id="peaStatus" class="text-sm"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-header"><div class="panel-title">📘 Assurance-Vie</div></div>
+            <div class="text-xs color-muted" style="line-height:1.7;margin-bottom:12px;">
+              <b style="color:var(--accent2)">Avantage :</b> Abattement de <b>4 600€/an</b> (9 200€ couple) sur les gains après 8 ans<br>
+              <b style="color:var(--accent2)">Taux :</b> 7.5% IR + 17.2% PS (si &lt; 150k€ versé)<br>
+              <b style="color:var(--accent2)">Idéal pour :</b> Diversification, transmission
+            </div>
+            <div id="avStatus" class="text-sm"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-header"><div class="panel-title">📙 PER</div></div>
+            <div class="text-xs color-muted" style="line-height:1.7;margin-bottom:12px;">
+              <b style="color:var(--gold)">Avantage :</b> Versements <b>déductibles du revenu imposable</b> (dans la limite de ~10% salaire brut)<br>
+              <b style="color:var(--gold)">Plafond :</b> 10% des revenus N-1 (max ~35 194€)<br>
+              <b style="color:var(--gold)">Idéal pour :</b> TMI élevée, préparer la retraite
+            </div>
+            <div id="perStatus" class="text-sm"></div>
+          </div>
+        </div>
+
+        <!-- Simulateur PER -->
+        <div class="panel" style="margin-top:24px;">
+          <div class="panel-header"><div class="panel-title">🔮 Simulateur d'économie PER</div></div>
+          <div class="grid-2">
+            <div>
+              <div class="field-group">
+                <label class="field-label">Versement PER annuel (€)</label>
+                <input class="field-input" type="range" id="perSimSlider" min="500" max="10000" value="2000" step="100" oninput="document.getElementById('perSimVal').textContent=this.value+'€'; updatePerSim()">
+                <div class="flex-between text-xs color-muted mt-8"><span>500€</span><span id="perSimVal">2 000€</span><span>10 000€</span></div>
+              </div>
+              <div id="perSimResult" style="margin-top:16px;"></div>
+            </div>
+            <div class="chart-wrap"><canvas id="chartPerSim"></canvas></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══════════════════════════════════════
+           PAGE: SIMULATION DE PRÊT
+      ══════════════════════════════════════ -->
+      <section class="page-section" id="page-loan">
+        <div class="section-title">🏠 Simulation de prêt immobilier</div>
+        <div class="section-sub">Capacité d'emprunt et comparaison des banques</div>
+
+        <!-- KPIs -->
+        <div class="kpi-grid" style="margin-bottom:24px;">
+          <div class="kpi-card">
+            <div class="kpi-label">Revenus mensuels nets</div>
+            <div class="kpi-value" id="loanNetDisplay">–</div>
+            <div class="kpi-sub">Salaire + aides</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Capacité d'emprunt max</div>
+            <div class="kpi-value color-accent" id="loanCapacite">–</div>
+            <div class="kpi-sub">Meilleur taux disponible</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Mensualité max</div>
+            <div class="kpi-value color-green" id="loanMensMax">–</div>
+            <div class="kpi-sub">Taux d'endettement ≤ 33%</div>
+          </div>
+        </div>
+
+        <div class="grid-2" style="margin-bottom:24px;">
+          <div class="panel">
+            <div class="panel-header"><div class="panel-title">Paramètres</div></div>
+            <div class="field-group">
+              <label class="field-label">Salaire net mensuel (€) <span style="color:var(--accent2);font-size:10px;">Auto-rempli depuis Salaire</span></label>
+              <input class="field-input" type="number" id="loanNet" placeholder="0" oninput="updateLoanCalc()">
+            </div>
+            <div class="field-group">
+              <label class="field-label">Apport personnel (€)</label>
+              <input class="field-input" type="number" id="loanApport" value="0" oninput="updateLoanCalc()">
+            </div>
+            <div class="field-group">
+              <label class="field-label">Prix du bien souhaité (€) <span style="color:var(--muted2);font-size:10px;">optionnel</span></label>
+              <input class="field-input" type="number" id="loanPrix" placeholder="0" oninput="updateLoanCalc()">
+            </div>
+            <div class="field-group">
+              <label class="field-label">Durée du prêt</label>
+              <select class="field-input" id="loanDuree" onchange="updateLoanCalc()">
+                <option value="10">10 ans</option>
+                <option value="15">15 ans</option>
+                <option value="20" selected>20 ans</option>
+                <option value="25">25 ans</option>
+                <option value="30">30 ans</option>
+              </select>
+            </div>
+            <div class="field-group">
+              <label class="field-label">Charges fixes mensuelles (€) <span style="color:var(--accent2);font-size:10px;">Auto-rempli depuis Budget</span></label>
+              <input class="field-input" type="number" id="loanMensExp" placeholder="0" oninput="updateLoanCalc()">
+            </div>
+            <div style="padding:12px;background:rgba(139,92,246,0.06);border:1px solid rgba(139,92,246,0.15);border-radius:8px;margin-top:8px;">
+              <div style="font-size:11px;color:var(--accent2);font-weight:600;margin-bottom:4px;">ℹ️ Taux d'endettement</div>
+              <div style="font-size:12px;color:var(--muted2);line-height:1.6;">Les banques françaises acceptent généralement un taux d'endettement jusqu'à <strong>35%</strong> des revenus nets (HCSF 2022). La règle de 33% reste la norme prudente.</div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-header"><div class="panel-title">Votre profil emprunteur</div></div>
+            <div style="font-size:13px;color:var(--muted2);line-height:1.8;margin-bottom:16px;">Les taux ci-dessous sont indicatifs (avril 2026) et varient selon votre apport, dossier et négociation.</div>
+            <div id="loanTauxEndetDisplay" style="margin-bottom:12px;"></div>
+            <div style="padding:12px;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.15);border-radius:8px;">
+              <div style="font-size:11px;color:var(--green);font-weight:600;margin-bottom:6px;">💡 Conseils pour maximiser votre capacité</div>
+              <div style="font-size:12px;color:var(--muted2);line-height:1.7;">
+                • <b>Augmentez l'apport</b> → taux plus bas, moins à emprunter<br>
+                • <b>Réduisez vos charges</b> → meilleur taux d'endettement<br>
+                • <b>Négociez</b> → -0.2% = économie de milliers d'€<br>
+                • <b>Comparez les assurances</b> → peut représenter 30% du coût total
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header"><div class="panel-title">🏦 Comparaison des banques</div></div>
+          <div style="overflow-x:auto;">
+            <table class="data-table">
+              <thead><tr>
+                <th>Banque</th>
+                <th>Taux</th>
+                <th>Capacité max</th>
+                <th>Mensualité</th>
+                <th>Taux endettement</th>
+                <th>Coût du crédit</th>
+                <th>Faisabilité</th>
+              </tr></thead>
+              <tbody id="loanBankTbody">
+                <tr><td colspan="7" style="text-align:center;color:var(--muted);padding:24px;">Renseignez votre salaire pour comparer les banques</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div style="margin-top:12px;font-size:11px;color:var(--muted2);">* Taux indicatifs. Coût du crédit = intérêts + frais de dossier. Assurance non incluse.</div>
+        </div>
+      </section>
+
+    </div><!-- /content -->
+  </main>
+
+  <!-- ── BOTTOM NAV MOBILE ── -->
+  <nav class="mobile-nav">
+    <button class="mobile-nav-item active" onclick="navigate('overview')" id="mn-overview">
+      <span class="mn-icon">🏠</span>Dashboard
+    </button>
+    <button class="mobile-nav-item" onclick="navigate('portfolio')" id="mn-portfolio">
+      <span class="mn-icon">📈</span>Portef.
+    </button>
+    <button class="mobile-nav-item" onclick="navigate('projection')" id="mn-projection">
+      <span class="mn-icon">🚀</span>DCA
+    </button>
+    <button class="mobile-nav-item" onclick="navigate('fiscalite')" id="mn-fiscalite">
+      <span class="mn-icon">🏛️</span>Fiscalité
+    </button>
+    <button class="mobile-nav-item" onclick="navigate('sources')" id="mn-sources">
+      <span class="mn-icon">🔗</span>Sources
+    </button>
+  </nav>
+
+  <!-- Splash screen -->
+  <div class="splash" id="splash">
+    <div class="splash-logo">₩</div>
+    <div class="splash-name">Patrim<b>onia</b></div>
+    <div class="splash-sub">Chargement…</div>
+  </div>
+
+  <!-- ══════════════════════════════════════
+       MODALS
+  ══════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-addAsset">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">Ajouter un actif</div>
+        <button class="close-btn" onclick="closeModal('addAsset')">✕</button>
+      </div>
+      <div class="form-grid">
+        <div class="form-full">
+          <label class="field-label">Nom / Ticker</label>
+          <input class="field-input" id="assetName" placeholder="ex: MSFT, BTC, ETF Amundi...">
+        </div>
+        <div>
+          <label class="field-label">Type</label>
+          <select class="field-input" id="assetType">
+            <option value="stock">Action / ETF</option>
+            <option value="crypto">Crypto</option>
+            <option value="savings">Épargne</option>
+            <option value="esop">ESOP / PER</option>
+          </select>
+        </div>
+        <div>
+          <label class="field-label">Source</label>
+          <select class="field-input" id="assetSource">
+            <option value="manual">Manuel</option>
+            <option value="sheets">Google Sheets</option>
+            <option value="binance">Binance</option>
+            <option value="crypto">Crypto.com</option>
+            <option value="tr">Trade Republic</option>
+          </select>
+        </div>
+        <div>
+          <label class="field-label">Quantité</label>
+          <input class="field-input" type="number" id="assetQty" placeholder="0" step="any">
+        </div>
+        <div>
+          <label class="field-label">Prix d'achat moyen (€)</label>
+          <input class="field-input" type="number" id="assetBuyPrice" placeholder="0.00" step="any">
+        </div>
+        <div>
+          <label class="field-label">Prix actuel (€)</label>
+          <input class="field-input" type="number" id="assetCurrentPrice" placeholder="0.00" step="any">
+        </div>
+        <div>
+          <label class="field-label">Géographie</label>
+          <select class="field-input" id="assetGeo">
+            <option value="us">États-Unis</option>
+            <option value="eu">Europe</option>
+            <option value="fr">France</option>
+            <option value="em">Émergents</option>
+            <option value="world">Monde</option>
+            <option value="other">Autre</option>
+          </select>
+        </div>
+        <div>
+          <label class="field-label">Secteur</label>
+          <select class="field-input" id="assetSector">
+            <option value="tech">Technologie</option>
+            <option value="finance">Finance</option>
+            <option value="health">Santé</option>
+            <option value="consumer">Consommation</option>
+            <option value="energy">Énergie</option>
+            <option value="industry">Industrie</option>
+            <option value="real_estate">Immobilier</option>
+            <option value="crypto">Crypto</option>
+            <option value="mixed">Mixte / ETF</option>
+          </select>
+        </div>
+        <div>
+          <label class="field-label">Devise</label>
+          <select class="field-input" id="assetCurrency">
+            <option value="EUR">EUR</option>
+            <option value="USD">USD</option>
+            <option value="GBP">GBP</option>
+          </select>
+        </div>
+        <div>
+          <label class="field-label">Frais annuels (%)</label>
+          <input class="field-input" type="number" id="assetFees" placeholder="0.20" step="0.01">
+        </div>
+      </div>
+      <div style="margin-top:20px; display:flex; gap:8px; justify-content:flex-end;">
+        <button class="btn btn-ghost" onclick="closeModal('addAsset')">Annuler</button>
+        <button class="btn btn-accent" onclick="addAsset()">Ajouter</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="modal-addSavings">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">Ajouter un livret</div>
+        <button class="close-btn" onclick="closeModal('addSavings')">✕</button>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Nom du compte</label>
+        <input class="field-input" id="savName" placeholder="Livret A, LDDS, PEL...">
+      </div>
+      <div class="form-grid">
+        <div>
+          <label class="field-label">Solde (€)</label>
+          <input class="field-input" type="number" id="savBalance" placeholder="0">
+        </div>
+        <div>
+          <label class="field-label">Taux annuel (%)</label>
+          <input class="field-input" type="number" id="savRate" placeholder="3.0" step="0.1">
+        </div>
+      </div>
+      <div style="margin-top:20px; display:flex; gap:8px; justify-content:flex-end;">
+        <button class="btn btn-ghost" onclick="closeModal('addSavings')">Annuler</button>
+        <button class="btn btn-accent" onclick="addSavings()">Ajouter</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="modal-editSalary">
+    <div class="modal" style="max-width:560px;">
+      <div class="modal-header">
+        <div class="modal-title">Informations salariales & aides</div>
+        <button class="close-btn" onclick="closeModal('editSalary')">✕</button>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:14px;padding:8px 12px;background:rgba(59,130,246,0.05);border-radius:8px;border:1px solid rgba(59,130,246,0.08);">
+        💡 Airbus : salaire net ≈ brut × 0.77 (charges ~23%). Intéressement/participation disponibles via votre espace RH.
+      </div>
+      <div class="form-grid">
+        <div>
+          <label class="field-label">Salaire brut mensuel (€)</label>
+          <input class="field-input" type="number" id="salGross" placeholder="3000" oninput="estimateNet()">
+        </div>
+        <div>
+          <label class="field-label">Salaire net mensuel (€)</label>
+          <input class="field-input" type="number" id="salNet" placeholder="2400">
+          <div class="text-xs color-muted mt-8" id="netEstimate" style="margin-top:4px;"></div>
+        </div>
+        <div>
+          <label class="field-label">Intéressement annuel (€)</label>
+          <input class="field-input" type="number" id="salInter" placeholder="0">
+        </div>
+        <div>
+          <label class="field-label">Participation annuelle (€)</label>
+          <input class="field-input" type="number" id="salPart" placeholder="0">
+        </div>
+        <div>
+          <label class="field-label">Épargne mensuelle (€)</label>
+          <input class="field-input" type="number" id="salSaved" placeholder="500">
+        </div>
+        <div>
+          <label class="field-label">Abondement Airbus / mois (€)</label>
+          <input class="field-input" type="number" id="salAbond" placeholder="0">
+        </div>
+      </div>
+      <!-- Aides sociales -->
+      <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border);">
+        <div class="text-sm fw-bold" style="margin-bottom:10px;">🏛️ Aides & revenus complémentaires</div>
+        <div class="form-grid">
+          <div>
+            <label class="field-label">APL / aide logement (€/mois)</label>
+            <input class="field-input" type="number" id="salApl" placeholder="0">
+          </div>
+          <div>
+            <label class="field-label">Allocations CAF (€/mois)</label>
+            <input class="field-input" type="number" id="salCaf" placeholder="0">
+          </div>
+          <div>
+            <label class="field-label">Prime transport (€/mois)</label>
+            <input class="field-input" type="number" id="salTransport" placeholder="0">
+          </div>
+          <div>
+            <label class="field-label">Tickets restaurant (€/mois)</label>
+            <input class="field-input" type="number" id="salTr" placeholder="0">
+          </div>
+          <div>
+            <label class="field-label">Autre revenu (€/mois)</label>
+            <input class="field-input" type="number" id="salOther" placeholder="0">
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:20px; display:flex; gap:8px; justify-content:flex-end;">
+        <button class="btn btn-ghost" onclick="closeModal('editSalary')">Annuler</button>
+        <button class="btn btn-accent" onclick="saveSalary()">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="modal-addExpense">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">Ajouter une dépense fixe</div>
+        <button class="close-btn" onclick="closeModal('addExpense')">✕</button>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Libellé</label>
+        <input class="field-input" id="expLabel" placeholder="Loyer, assurance, transport...">
+      </div>
+      <div class="form-grid">
+        <div>
+          <label class="field-label">Montant mensuel (€)</label>
+          <input class="field-input" type="number" id="expAmount" placeholder="0">
+        </div>
+        <div>
+          <label class="field-label">Catégorie</label>
+          <select class="field-input" id="expCategory">
+            <option value="logement">🏠 Logement</option>
+            <option value="transport">🚗 Transport</option>
+            <option value="assurance">🛡️ Assurance</option>
+            <option value="abonnement">📱 Abonnements</option>
+            <option value="alimentation">🛒 Alimentation</option>
+            <option value="autre">📦 Autre</option>
+          </select>
+        </div>
+      </div>
+      <div style="margin-top:20px; display:flex; gap:8px; justify-content:flex-end;">
+        <button class="btn btn-ghost" onclick="closeModal('addExpense')">Annuler</button>
+        <button class="btn btn-accent" onclick="addExpense()">Ajouter</button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ── MODAL: SUPPRIMER COMPTE ── -->
+  <div class="modal-overlay" id="modal-deleteAccount">
+    <div class="modal" style="max-width:440px;">
+      <div class="modal-header">
+        <div class="modal-title" style="color:var(--danger);">⚠️ Supprimer mon compte</div>
+        <button class="close-btn" onclick="closeModal('deleteAccount')">✕</button>
+      </div>
+      <div style="background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.2);border-radius:8px;padding:14px;margin-bottom:20px;">
+        <div style="font-size:13px;color:var(--text);line-height:1.7;">
+          Cette action est <strong>irréversible</strong>. Elle supprimera :<br>
+          • Votre compte et vos identifiants<br>
+          • Toutes vos données financières<br>
+          • Votre historique complet
+        </div>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Tapez <strong>SUPPRIMER</strong> pour confirmer</label>
+        <input class="field-input" id="deleteConfirmText" placeholder="SUPPRIMER" oninput="checkDeleteConfirm()">
+      </div>
+      <div style="margin-top:6px;font-size:12px;color:var(--muted2);">
+        Votre mot de passe vous sera demandé à l'étape suivante.
+      </div>
+      <div style="margin-top:20px;display:flex;gap:8px;justify-content:flex-end;">
+        <button class="btn btn-ghost" onclick="closeModal('deleteAccount')">Annuler</button>
+        <button class="btn btn-danger" id="deleteAccountBtn" onclick="deleteAccount()" disabled style="opacity:0.4;cursor:not-allowed;">
+          Supprimer définitivement
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── MODAL: CONFIRMER MOT DE PASSE (suppression) ── -->
+  <div class="modal-overlay" id="modal-deletePassword">
+    <div class="modal" style="max-width:400px;">
+      <div class="modal-header">
+        <div class="modal-title">🔒 Confirmer votre identité</div>
+        <button class="close-btn" onclick="closeModal('deletePassword')">✕</button>
+      </div>
+      <div style="font-size:13px;color:var(--muted2);margin-bottom:16px;">
+        Entrez votre mot de passe pour finaliser la suppression de votre compte.
+      </div>
+      <div class="field-group">
+        <label class="field-label">Mot de passe</label>
+        <input class="field-input" id="deletePassword" type="password" placeholder="Votre mot de passe">
+      </div>
+      <div id="deleteErrorMsg" style="font-size:12px;color:var(--danger);margin-top:6px;display:none;"></div>
+      <div style="margin-top:20px;display:flex;gap:8px;justify-content:flex-end;">
+        <button class="btn btn-ghost" onclick="closeModal('deletePassword')">Annuler</button>
+        <button class="btn btn-danger" id="deletePasswordBtn" onclick="confirmDeleteAccount()">
+          Supprimer mon compte
+        </button>
+      </div>
+    </div>
+  </div>
+
+
+  <script>
+    let currentFiscalProfile = 'salarie';
+
+    function selectFiscalProfile(profile, btn) {
+      currentFiscalProfile = profile;
+      document.querySelectorAll('.fiscal-profile-btn').forEach(b => b.classList.remove('active'));
+      if(btn) btn.classList.add('active');
+      const taxAppWrap = document.getElementById('taxAppFieldWrap');
+      const taxStudWrap = document.getElementById('taxStudentFieldWrap');
+      const taxAEWrap = document.getElementById('taxAEFieldWrap');
+      if(taxAppWrap) taxAppWrap.style.display = profile === 'apprenti' ? 'block' : 'none';
+      if(taxStudWrap) taxStudWrap.style.display = profile === 'etudiant' ? 'block' : 'none';
+      if(taxAEWrap) taxAEWrap.style.display = profile === 'autoentrepreneur' ? 'block' : 'none';
+      const banner = document.getElementById('exemptionBanner');
+      const title  = document.getElementById('exemptionTitle');
+      const desc   = document.getElementById('exemptionDesc');
+      const exos = {
+        apprenti:  { t: "✓ Exonération apprenti / alternant", d: "Salaire d'apprentissage exonéré d'IR jusqu'à 1 SMIC (20 815 € en 2025). La fraction au-dessus est imposée normalement." },
+        etudiant:  { t: "✓ Exonération job étudiant (< 26 ans)", d: "Revenus de jobs étudiants exonérés jusqu'à 3 SMIC (≈ 62 445 €) si vous avez moins de 26 ans. Au-delà, imposition normale." },
+        retraite:  { t: "✓ Abattement retraite", d: "Abattement de 10% (min 442 €, max 4 321 €). Abattement spécial 2 446 € pour les +65 ans sous conditions de ressources." }
+      };
+      if (banner && title && desc) {
+        if (exos[profile]) { title.textContent = exos[profile].t; desc.textContent = exos[profile].d; banner.classList.add('visible'); }
+        else banner.classList.remove('visible');
       }
+      calculateTax();
     }
-  }
 
-  // Render bar chart
-  chartAssetInstance = new Chart(ctx.getContext('2d'), {
-    type: 'bar',
-    data: {
-      labels,
-      datasets: [{
-        data: perfData,
-        backgroundColor: bgColors,
-        borderRadius: 4,
-        borderSkipped: false,
-      }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: {
-            label: ctx => `${ctx.parsed.y >= 0 ? '+' : ''}${ctx.parsed.y.toFixed(1)}%`
-          }
-        }
-      },
-      scales: {
-        y: {
-          grid: { color: gridCol },
-          ticks: { color: mutedCol, callback: v => (v >= 0 ? '+' : '') + v + '%' }
-        },
-        x: { grid: { display: false }, ticks: { color: mutedCol, font: { size: 10 } } }
+    function computeDiversityScore() {
+      if (typeof assets === 'undefined' || !assets.length) {
+        document.getElementById('scoreDetails').innerHTML = '<div style="font-size:13px;color:var(--muted);">Aucun actif — ajoutez des positions pour calculer votre score.</div>';
+        return;
       }
-    }
-  });
-
-  // Render sparklines (mini cards)
-  if (sparkEl && isGlobal) {
-    sparkEl.innerHTML = displayAssets.map(a => {
-      const v   = assetValue(a);
-      const pct = normPct(getPerfRatio(a));
-      const col = pct >= 0 ? 'var(--green)' : 'var(--danger)';
-      const sign = pct >= 0 ? '+' : '';
-      const shortName = (a.name || a.ticker || '?').replace(/\s*\(.*?\)\s*/, '').substring(0, 18);
-      return `<div style="background:var(--surface2);border-radius:8px;padding:10px 12px;border:1px solid var(--border);">
-        <div style="font-size:11px;color:var(--muted2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${shortName}</div>
-        <div style="font-size:16px;font-weight:600;margin-top:4px;">${fmt.format(v)}</div>
-        <div style="font-size:12px;font-weight:500;color:${col};">${sign}${pct.toFixed(1)}%</div>
-      </div>`;
-    }).join('');
-  } else if (sparkEl) {
-    sparkEl.innerHTML = '';
-  }
-}
-
-// ─── ÉPARGNE ─────────────────────────────────────────────────────────────
-
-let chartSavingsInstance = null;
-
-function renderSavings() {
-  const total = savings.reduce((s,sv)=>s+(sv.balance||0),0);
-  const ints  = savings.reduce((s,sv)=>s+(sv.balance||0)*((sv.rate||0)/100),0);
-  const avg   = total>0?(savings.reduce((s,sv)=>s+(sv.balance||0)*(sv.rate||0),0)/total).toFixed(2):0;
-  safeSet('savingsTotal', fmt.format(total));
-  safeSet('savingsInterests', fmt.format(ints));
-  safeSet('savingsAvgRate', avg + '%');
-  const list = document.getElementById('savingsList');
-  if (list) list.innerHTML = savings.length ? savings.map((sv,i)=>`
-    <div class="fee-item">
-      <div><div style="font-size:14px;font-weight:500;">${sv.name}</div><div style="font-size:12px;color:var(--muted2);">Taux : ${sv.rate||0}%</div></div>
-      <div style="text-align:right;"><div style="font-weight:600;">${fmt.format(sv.balance||0)}</div>
-      <button onclick="deleteSavings(${i})" style="font-size:11px;color:var(--danger);background:none;border:none;cursor:pointer;">Supprimer</button></div>
-    </div>`).join('') : '<div class="empty-state"><div class="icon">🏦</div><p>Aucun livret</p></div>';
-  const ctx = document.getElementById('chartSavings');
-  if (ctx && savings.length) {
-    if (chartSavingsInstance) chartSavingsInstance.destroy();
-    chartSavingsInstance = new Chart(ctx.getContext('2d'), {
-      type:'doughnut',
-      data:{ labels:savings.map(s=>s.name), datasets:[{data:savings.map(s=>s.balance), backgroundColor:['#3b82f6','#22c55e','#f59e0b','#a78bfa','#ef4444'], borderWidth:0}] },
-      options:{cutout:'65%',plugins:{legend:{position:'right',labels:{color:getComputedStyle(document.documentElement).getPropertyValue('--text')||'#fff',font:{size:11}}}}}
-    });
-  }
-}
-
-function addSavings() {
-  const name=document.getElementById('savName')?.value?.trim();
-  if (!name) return showToast('Entrez un nom','#ef4444');
-  savings.push({ name, balance:parseFloat(document.getElementById('savBalance')?.value)||0, rate:parseFloat(document.getElementById('savRate')?.value)||0 });
-  saveLocalData(); closeModal('addSavings'); renderSavings(); initOverview(); showToast('Livret ajouté ✓','#22c55e');
-}
-
-function deleteSavings(i) { savings.splice(i,1); saveLocalData(); renderSavings(); initOverview(); }
-
-// ─── SALAIRE ─────────────────────────────────────────────────────────────
-
-function renderSalary() {
-  const net=salaryData.net||0, saved=salaryData.saved||0;
-  const apl=salaryData.apl||0, caf=salaryData.caf||0, transport=salaryData.transport||0, tr2=salaryData.tr||0, other=salaryData.other||0;
-  const aides=apl+caf+transport+tr2+other;
-  const totalRevenu=net+aides;
-  const fixed=expenses.reduce((s,e)=>s+(e.amount||0),0);
-  const avail=totalRevenu-saved-fixed, rate=totalRevenu>0?Math.round((saved/totalRevenu)*100):0;
-  safeSet('grossDisplay', salaryData.gross?fmt.format(salaryData.gross):'–');
-  safeSet('netDisplay',   net?fmt.format(net):'–');
-  safeSet('interDisplay', salaryData.inter?fmt.format(salaryData.inter):'–');
-  safeSet('partDisplay',  salaryData.part?fmt.format(salaryData.part):'–');
-  safeSet('rateValBig',   rate+'%');
-  safeSet('savedMonthly', saved?fmt.format(saved):'–');
-  safeSet('fixedExp',     fixed?fmt.format(fixed):'–');
-  safeSet('available',    fmt.format(Math.max(avail,0)));
-  // Affiche les aides dans la section revenus
-  const aidesEl=document.getElementById('aidesDisplay');
-  if(aidesEl) {
-    const rows=[];
-    if(apl)       rows.push(`<div class="flex-between text-sm mt-8"><span class="color-muted">APL / aide logement</span><span>${fmt.format(apl)}/mois</span></div>`);
-    if(caf)       rows.push(`<div class="flex-between text-sm mt-8"><span class="color-muted">Allocations CAF</span><span>${fmt.format(caf)}/mois</span></div>`);
-    if(transport) rows.push(`<div class="flex-between text-sm mt-8"><span class="color-muted">Prime transport</span><span>${fmt.format(transport)}/mois</span></div>`);
-    if(tr2)       rows.push(`<div class="flex-between text-sm mt-8"><span class="color-muted">Tickets restaurant</span><span>${fmt.format(tr2)}/mois</span></div>`);
-    if(other)     rows.push(`<div class="flex-between text-sm mt-8"><span class="color-muted">Autres revenus</span><span>${fmt.format(other)}/mois</span></div>`);
-    if(rows.length) aidesEl.innerHTML='<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);"><div style="font-size:11px;color:var(--accent2);font-weight:600;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">Aides & revenus complémentaires</div>'+rows.join('')+'<div class="flex-between text-sm mt-8" style="font-weight:600;border-top:1px solid var(--border);padding-top:8px;"><span>Total revenus</span><span style="color:var(--accent2);">'+fmt.format(totalRevenu)+'/mois</span></div></div>';
-    else aidesEl.innerHTML='';
-  }
-  const pct=v=>totalRevenu>0?Math.min((v/totalRevenu)*100,100):0;
-  [['netBar',pct(net)],['savedBar',pct(saved)],['fixedBar',pct(fixed)],['availBar',Math.max(pct(avail),0)]].forEach(([id,w])=>{
-    const el=document.getElementById(id); if(el) el.style.width=w+'%';
-  });
-  const list=document.getElementById('expensesList');
-  if (list) list.innerHTML = expenses.length ? expenses.map((e,i)=>`
-    <div class="fee-item">
-      <div><div style="font-size:13px;font-weight:500;">${e.label}</div><div style="font-size:11px;color:var(--muted2);">${e.category||''}</div></div>
-      <div style="display:flex;align-items:center;gap:12px;"><span style="font-weight:600;">${fmt.format(e.amount||0)}/mois</span>
-      <button onclick="deleteExpense(${i})" style="font-size:11px;color:var(--danger);background:none;border:none;cursor:pointer;">✕</button></div>
-    </div>`).join('') : '<div class="empty-state"><div class="icon">💳</div><p>Aucune dépense fixe</p></div>';
-}
-
-function estimateNet() {
-  const g=parseFloat(document.getElementById('salGross')?.value)||0;
-  const n=Math.round(g*0.77);
-  const el=document.getElementById('netEstimate'); if(el&&g) el.textContent='Estimation : '+fmt.format(n)+'/mois';
-  const ni=document.getElementById('salNet'); if(ni&&g&&!ni.value) ni.value=n;
-}
-
-function saveSalary() {
-  const g=id=>parseFloat(document.getElementById(id)?.value)||0;
-  salaryData={gross:g('salGross'),net:g('salNet'),inter:g('salInter'),part:g('salPart'),saved:g('salSaved'),abond:g('salAbond'),apl:g('salApl'),caf:g('salCaf'),transport:g('salTransport'),tr:g('salTr'),other:g('salOther')};
-  saveLocalData(); closeModal('editSalary'); renderSalary(); initOverview();
-  autoFillFiscalFromSalary();
-  showToast('Salaire enregistré ✓','#22c55e');
-}
-
-function addExpense() {
-  const label=document.getElementById('expLabel')?.value?.trim();
-  if (!label) return showToast('Entrez un libellé','#ef4444');
-  expenses.push({ label, amount:parseFloat(document.getElementById('expAmount')?.value)||0, category:document.getElementById('expCategory')?.value||'autre' });
-  saveLocalData(); closeModal('addExpense'); renderSalary(); initOverview(); showToast('Dépense ajoutée ✓','#22c55e');
-}
-
-function deleteExpense(i) { expenses.splice(i,1); saveLocalData(); renderSalary(); initOverview(); }
-
-// ─── PROJECTION DCA ──────────────────────────────────────────────────────
-
-let chartProjInstance = null;
-
-function updateProjection() {
-  const start=parseFloat(document.getElementById('projStartCapital')?.value)||0;
-  const dca  =parseFloat(document.getElementById('projMonthly')?.value)||500;
-  const rate =(parseFloat(document.getElementById('projRate')?.value)||8)/100;
-  const years=parseInt(document.getElementById('projYears')?.value)||20;
-  let capital=start, invested=start;
-  const labels=[],dataCap=[],dataInv=[];
-  for(let i=0;i<=years;i++){
-    labels.push('Année '+i); dataCap.push(Math.round(capital)); dataInv.push(Math.round(invested));
-    if(i<years){ capital=(capital+dca*12)*(1+rate); invested+=dca*12; }
-  }
-  const gains=capital-invested;
-  safeSet('projectedValue', fmt.format(capital));
-  safeSet('projectedGains', fmt.format(gains));
-  safeSet('projectionMeta', years+' ans · '+(rate*100).toFixed(0)+'% / an · DCA '+fmt.format(dca)+'/mois');
-  const msEl=document.getElementById('milestones');
-  if(msEl){
-    const targets=[10000,50000,100000,250000,500000,1000000];
-    msEl.innerHTML=targets.map(t=>{
-      let yr=null; for(let i=0;i<dataCap.length;i++){if(dataCap[i]>=t){yr=i;break;}}
-      const c=yr!==null?'#22c55e':'var(--muted)';
-      return `<div style="padding:10px 16px;background:var(--surface2);border-radius:8px;text-align:center;min-width:100px;">
-        <div style="font-size:11px;color:var(--muted2);">Objectif</div>
-        <div style="font-size:15px;font-weight:600;color:${c};">${fmt.format(t)}</div>
-        <div style="font-size:11px;color:${c};">${yr!==null?'Année '+yr:'Non atteint'}</div></div>`;
-    }).join('');
-  }
-  const ctx=document.getElementById('chartProjection');
-  if(!ctx) return;
-  if(chartProjInstance) chartProjInstance.destroy();
-  chartProjInstance=new Chart(ctx.getContext('2d'),{
-    type:'line',
-    data:{labels,datasets:[
-      {label:'Capital projeté',data:dataCap,borderColor:'#3b82f6',backgroundColor:'rgba(59,130,246,0.08)',fill:true,tension:0.4,pointRadius:0},
-      {label:'Total investi',  data:dataInv,borderColor:'#52525b',borderDash:[5,5],fill:false,pointRadius:0}
-    ]},
-    options:{responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{labels:{color:getComputedStyle(document.documentElement).getPropertyValue('--muted2')||'#94a3b8',font:{size:11}}}},
-      scales:{y:{grid:{color:getComputedStyle(document.documentElement).getPropertyValue('--border')||'rgba(255,255,255,0.04)'},ticks:{color:getComputedStyle(document.documentElement).getPropertyValue('--muted2')||'#52525b',callback:v=>fmt.format(v)}},
-              x:{grid:{display:false},ticks:{color:getComputedStyle(document.documentElement).getPropertyValue('--muted2')||'#52525b',maxTicksLimit:8}}}}
-  });
-}
-
-// ─── SCANNER DE FRAIS ────────────────────────────────────────────────────
-
-function renderFees() {
-  const total=assets.reduce((s,a)=>s+(a.qty||1)*(a.currentPrice||0),0);
-  const fees =assets.reduce((s,a)=>s+(a.qty||1)*(a.currentPrice||0)*((a.fees||0)/100),0);
-  safeSet('feeTotal',  fmt.format(fees));
-  safeSet('feeImpact', fmt.format(fees*20));
-  safeSet('feeScore',  (fees>0&&total>0?Math.max(1,10-Math.round((fees/total)*1000)):10)+'/10');
-  const el=document.getElementById('feesBreakdown');
-  if(!el) return;
-  if(!assets.length){el.innerHTML='<div class="empty-state"><div class="icon">🔍</div><p>Ajoutez des actifs pour analyser les frais</p></div>';return;}
-  el.innerHTML=assets.map(a=>{
-    const val=(a.qty||1)*(a.currentPrice||0), fee=val*((a.fees||0)/100);
-    const dot=(a.fees||0)<=0.2?'#22c55e':(a.fees||0)<=0.5?'#f59e0b':'#ef4444';
-    return `<div class="fee-item"><div class="fee-score" style="background:${dot};"></div>
-      <div style="flex:1;"><div style="font-size:13px;font-weight:500;">${a.name||'–'}</div><div style="font-size:11px;color:var(--muted2);">${a.fees||0}% / an</div></div>
-      <div style="text-align:right;"><div style="font-weight:600;color:var(--danger);">${fmt.format(fee)}/an</div><div style="font-size:11px;color:var(--muted2);">${fmt.format(val)} investi</div></div></div>`;
-  }).join('');
-}
-
-// ─── AJOUT ACTIF ─────────────────────────────────────────────────────────
-
-function addAsset() {
-  const name=document.getElementById('assetName')?.value?.trim();
-  if(!name) return showToast('Entrez un nom / ticker','#ef4444');
-  const g=id=>document.getElementById(id);
-  assets.push({ name, type:g('assetType')?.value||'stock', source:g('assetSource')?.value||'manual',
-    qty:parseFloat(g('assetQty')?.value)||1, buyPrice:parseFloat(g('assetBuyPrice')?.value)||0,
-    currentPrice:parseFloat(g('assetCurrentPrice')?.value)||0, geo:g('assetGeo')?.value||'world',
-    sector:g('assetSector')?.value||'mixed', currency:g('assetCurrency')?.value||'EUR',
-    fees:parseFloat(g('assetFees')?.value)||0 });
-  saveLocalData(); closeModal('addAsset'); initOverview(); renderPortfolio(); showToast(name+' ajouté ✓','#22c55e');
-}
-
-// ─── CONNEXIONS ──────────────────────────────────────────────────────────
-
-async function connectSheets() {
-  const apiKey = document.getElementById('sheetsApiKey')?.value?.trim();
-  const url    = document.getElementById('sheetsUrl')?.value?.trim();
-  if (!apiKey || !url) return showToast('Clé API et URL requis', '#ef4444');
-  const match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-  if (!match) return showToast('URL invalide', '#ef4444');
-  const sheetId = match[1];
-  const btn = document.getElementById('importSheetsBtn');
-
-  // Parse number: handles French locale "1 282,40" → 1282.40, "1.282,40" → 1282.40
-  const p = s => {
-    if (s === null || s === undefined || s === '') return 0;
-    let str = s.toString().trim();
-    // Remove any currency symbols or % signs
-    str = str.replace(/[€$£%\s]/g, '');
-    // If dot is thousands separator (e.g. "1.282,40"), remove dots before comma
-    if (str.includes(',') && str.includes('.') && str.lastIndexOf('.') < str.lastIndexOf(',')) {
-      str = str.replace(/\./g, '');
-    }
-    // Replace comma decimal separator with dot
-    str = str.replace(',', '.');
-    const n = parseFloat(str);
-    return isNaN(n) ? 0 : n;
-  };
-  const t = s => (s||'').toString().trim();
-
-  async function fetchTab(name) {
-    try {
-      const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(name)}?key=${apiKey}`);
-      const data = await res.json();
-      if (data.error) { console.warn(`Onglet "${name}" ignoré:`, data.error.message); return null; }
-      return data.values || [];
-    } catch(e) { return null; }
-  }
-
-  try {
-    if (btn) btn.textContent = '⏳ Import en cours...';
-    assets = assets.filter(a => !a.source?.startsWith('sheets-'));
-    let imported = 0;
-
-    // CTO — A=Ticker B=Nom C=Qté D=PRU E=Prix(devise locale) F=Investi(€) G=ValTotale(€)
-    //        H=1J I=Hebdo J=1Mois K=6Mois L=YTD M=Perf% N=Catégorie O=Secteur P=ZoneGéo
-    //        U=TickerLocal V=TickerYahoo W=Devise X=PrixSecours
-    //        Note: Prix (col E) peut être en USD pour les actions US.
-    //              Investi (col F) et ValTotale (col G) sont TOUJOURS en EUR.
-    const ctoRows = await fetchTab('CTO');
-    if (ctoRows) {
-      ctoRows.slice(1).forEach(row => {
-        const ticker = t(row[0]);
-        if (!ticker || ticker.toUpperCase() === 'TOTAL' || !ticker) return;
-
-        const nom        = t(row[1]) || ticker;
-        const qty        = p(row[2]);
-        const pru        = p(row[3]);           // PRU en devise locale
-        const prixBrut   = p(row[4]);           // Prix actuel en devise locale (peut être USD)
-        const investi    = p(row[5]);            // Investi en EUR ✓
-        const valTotale  = p(row[6]);            // Valeur totale en EUR ✓ (déjà convertie)
-        const devise     = t(row[23]) || t(row[22]) || 'EUR';
-        const prixSecours = p(row[24]);          // Prix secours (EUR)
-
-        // Ignorer les lignes vides
-        if (qty === 0 && valTotale === 0 && investi === 0) return;
-
-        // Prix affiché : utiliser valTotale/qty si dispo (déjà en EUR)
-        // Sinon prix brut (attention : peut être USD si devise='USD')
-        const prixEUR = valTotale > 0 && qty > 0 ? valTotale / qty
-                      : prixSecours > 0 ? prixSecours
-                      : prixBrut;
-
-        const geoRaw = t(row[15]).toLowerCase();
-        const geoMap = {'usa':'us','états-unis':'us','etats-unis':'us','europe':'eu',
-                        'france':'fr','monde':'world','emergent':'em','emergents':'em'};
-        const geo    = geoMap[geoRaw] || 'world';
-        const secRaw = t(row[14]).toLowerCase();
-        const sector = secRaw.includes('tech')     ? 'tech'
-                     : secRaw.includes('nerg')     ? 'energy'
-                     : secRaw.includes('inanc')    ? 'finance'
-                     : secRaw.includes('sant') || secRaw.includes('alth') ? 'health'
-                     : secRaw.includes('onautique') || secRaw.includes('ndustri') ? 'industry'
-                     : secRaw.includes('rypto')    ? 'crypto'
-                     : 'mixed';
-
-        assets.push({
-          name:         `${nom} (${ticker})`,
-          ticker,
-          source:       'sheets-cto',
-          type:         'stock',
-          qty,
-          buyPrice:     pru,           // PRU en devise locale (pour calcul % relatif)
-          currentPrice: prixEUR,       // Prix en EUR
-          investi,                     // Coût total en EUR ✓
-          valTotale,                   // Valeur totale en EUR ✓
-          perf1d:   p(row[7]),
-          perfW:    p(row[8]),
-          perfM:    p(row[9]),
-          perfYtd:  p(row[11]),
-          perfTotal:p(row[12]),
-          geo, sector,
-          currency: devise,
-          fees:     0,
-        });
-        imported++;
-      });
+      const fmtE = v => new Intl.NumberFormat('fr-FR',{style:'currency',currency:'EUR',maximumFractionDigits:0}).format(v);
+      const totalVal = assets.reduce((s,a) => s + (a.qty||1)*(a.currentPrice||a.buyPrice||0), 0);
+      if (!totalVal) return;
+      const scores = [];
+      const types = new Set(assets.map(a => a.type||'stock'));
+      scores.push({label:"Classes d'actifs", score:Math.min(types.size/3*2,2), max:2, detail:types.size+" classe(s)"});
+      const geos = {};
+      assets.forEach(a => { const g=a.geo||'other'; geos[g]=(geos[g]||0)+(a.qty||1)*(a.currentPrice||0); });
+      const geoKeys=Object.keys(geos).length, maxGP=Math.max(...Object.values(geos))/totalVal;
+      scores.push({label:"Diversification geo.", score:Math.min((geoKeys>=3?1:geoKeys/3)+(maxGP<0.5?1:0.5),2), max:2, detail:geoKeys+" region(s), max "+Math.round(maxGP*100)+"%"});
+      const sectors={};
+      assets.forEach(a => { const s=a.sector||'mixed'; sectors[s]=(sectors[s]||0)+(a.qty||1)*(a.currentPrice||0); });
+      const secKeys=Object.keys(sectors).length, maxSP=Math.max(...Object.values(sectors))/totalVal;
+      scores.push({label:"Secteurs", score:Math.min((secKeys>=4?1:secKeys/4)+(maxSP<0.4?1:0.5),2), max:2, detail:secKeys+" secteur(s), max "+Math.round(maxSP*100)+"%"});
+      const maxConc=Math.max(...assets.map(a=>(a.qty||1)*(a.currentPrice||0)))/totalVal;
+      scores.push({label:"Concentration actif unique", score:maxConc<0.2?2:maxConc<0.35?1.5:maxConc<0.5?1:0.5, max:2, detail:"Position max : "+Math.round(maxConc*100)+"%"});
+      const liqPct=assets.filter(a=>['stock','crypto','savings'].includes(a.type||'stock')).reduce((s,a)=>s+(a.qty||1)*(a.currentPrice||0),0)/totalVal;
+      scores.push({label:"Liquidite", score:liqPct>0.7?2:liqPct>0.4?1.5:1, max:2, detail:Math.round(liqPct*100)+"% d'actifs liquides"});
+      const total=scores.reduce((s,c)=>s+c.score,0), totalR=Math.round(total*10)/10;
+      const fill=document.getElementById('scoreRingFill'), svgText=document.getElementById('scoreSvgText'), badge=document.getElementById('scoreBadge');
+      fill.style.strokeDashoffset=346-(total/10)*346;
+      const color=total>=7?'#22c55e':total>=5?'#f59e0b':'#ef4444';
+      fill.style.stroke=color; svgText.textContent=totalR; svgText.style.fill=color;
+      badge.textContent=total>=7?'Bien diversifie':total>=5?'Diversification correcte':'Peu diversifie';
+      badge.className='badge '+(total>=7?'badge-up':total>=5?'badge-neutral':'badge-down');
+      document.getElementById('scoreDetails').innerHTML=scores.map(s=>{
+        const pct=(s.score/s.max)*100, c=s.score>=s.max*0.75?'#22c55e':s.score>=s.max*0.5?'#f59e0b':'#ef4444';
+        return `<div class="div-item"><div class="div-item-label"><div style="font-weight:500;">${s.label}</div><div style="font-size:11px;color:var(--muted);">${s.detail}</div></div><div class="div-bar"><div class="div-bar-fill" style="width:${pct}%;background:${c};"></div></div><div class="div-item-score" style="color:${c};">${s.score.toFixed(1)}/${s.max}</div></div>`;
+      }).join('');
+      const recos=[];
+      if(types.size<3) recos.push('Diversifiez entre actions, crypto et epargne.');
+      if(maxGP>0.5) recos.push('Reduisez la concentration geographique (< 50% par zone).');
+      if(maxConc>0.35) recos.push('Position dominante > 35% — repartissez.');
+      if(geoKeys<3) recos.push('Ajoutez des actifs sur differentes zones.');
+      if(secKeys<3) recos.push('Diversifiez par secteur : tech, sante, finance...');
+      if(!recos.length) recos.push('Excellent ! Portefeuille bien equilibre.');
+      document.getElementById('scoreRecos').innerHTML='<div style="font-size:12px;font-weight:600;color:var(--muted2);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;">Recommandations</div>'+recos.map(r=>`<div style="font-size:13px;padding:8px 0;border-bottom:1px solid var(--border);color:var(--muted2);">${r}</div>`).join('');
+      renderRegionHeatmap(geos,totalVal);
+      renderAnalysisCharts(geos,sectors,totalVal);
     }
 
-    // AIRBUS — A=Année B=Enveloppe C=Nom D=Investi E=ActionsAchetées F=ActionsOffertes
-    //          G=PartsDividendes H=TotalQté I=PRUAchat J=PRURéel K=Cours L=ValTotale M=Perf%
-    const airbusRows = await fetchTab('AIRBUS');
-    if (airbusRows) {
-      airbusRows.slice(1).forEach(row => {
-        const enveloppe = t(row[1]).toUpperCase();  // PEG ou PERCOL
-        const nom       = t(row[2]);
-        if (!nom || nom.toUpperCase() === 'TOTAL' || !enveloppe) return;
-
-        const investi   = p(row[3]);
-        const totalQty  = p(row[7]);
-        const pruAchat  = p(row[8]);
-        const cours     = p(row[10]);
-        const valTotale = p(row[11]);
-        const perf      = p(row[12]);
-
-        // Intéressement PEG → c'est une action Airbus dans le portefeuille PEG
-        // On l'inclut comme actif EPA:AIR avec l'enveloppe PEG
-        const nomLower = nom.toLowerCase()
-          .normalize('NFD').replace(/[\u0300-\u036f]/g, ''); // remove accents
-        
-        const isInteressement = nomLower.includes('interessement') || nomLower.includes('participation');
-
-        // Ignorer lignes 100% vides
-        if (valTotale === 0 && totalQty === 0 && investi === 0) return;
-
-        // Ticker : tout ce qui est PEG ou Airbus/ESOP → EPA:AIR
-        //          PERCOL PME/Diversifié → PME
-        const ticker = (enveloppe === 'PEG' || nom.toLowerCase().includes('airbus') || nom.toLowerCase().includes('esop'))
-                      ? 'EPA:AIR' : 'PERCOL-PME';
-
-        const serial   = p(row[0]);
-        const annee    = serial > 40000
-          ? new Date(Math.round((serial - 25569) * 86400 * 1000)).getFullYear()
-          : '';
-
-        // Calcul valeur : préférer valTotale de la feuille (déjà en EUR)
-        const val = valTotale > 0 ? valTotale : (totalQty > 0 && cours > 0 ? totalQty * cours : 0);
-        if (val === 0 && investi === 0) return;
-
-        const shortLabel = isInteressement ? `Int\u00E9ressement ${enveloppe}` : nom;
-        const displayName = `${shortLabel} ${enveloppe} ${annee}`.trim();
-
-        assets.push({
-          name:         displayName,
-          ticker,
-          source:       'sheets-airbus',
-          type:         'esop',
-          qty:          totalQty,
-          buyPrice:     pruAchat,
-          currentPrice: cours,
-          investi,
-          valTotale:    val,
-          perfTotal:    perf,
-          enveloppe,
-          geo:          'eu',
-          sector:       'industry',
-          currency:     'EUR',
-          fees:         0,
-        });
-        imported++;
-      });
-
-      // L'intéressement va AUSSI dans le salaire annuel (montant investi = versement annuel)
-      const interRows = airbusRows.slice(1).filter(row => {
-        const n = (row[2]||'').toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-        return n.includes('interessement') || n.includes('participation');
-      });
-      const interTotal = interRows.reduce((s, row) => s + p(row[3]), 0);
-      if (interTotal > 0) salaryData.inter = interTotal;
+    function renderRegionHeatmap(geos,totalVal) {
+      const fmtE=v=>new Intl.NumberFormat('fr-FR',{style:'currency',currency:'EUR',maximumFractionDigits:0}).format(v);
+      const meta={us:{flag:'&#127482;&#127480;',name:'Etats-Unis'},eu:{flag:'&#127466;&#127482;',name:'Europe'},fr:{flag:'&#127467;&#127479;',name:'France'},em:{flag:'&#127759;',name:'Emergents'},world:{flag:'&#127760;',name:'Monde'},other:{flag:'&#128230;',name:'Autre'}};
+      const el=document.getElementById('regionHeatmap'); if(!el) return;
+      el.innerHTML=Object.entries(geos).sort((a,b)=>b[1]-a[1]).map(([k,v])=>{
+        const pct=((v/totalVal)*100).toFixed(1), m=meta[k]||{flag:'??',name:k};
+        return `<div class="region-card" style="border-color:rgba(139,92,246,${v/totalVal*0.4+0.06});"><div class="region-flag">${m.flag}</div><div class="region-name">${m.name}</div><div class="region-pct" style="color:var(--accent2);">${pct}%</div><div class="region-amount">${fmtE(v)}</div></div>`;
+      }).join('');
     }
 
-    // CRYPTO — A=Ticker B=Nom C=Qté D=PRU E=Prix€ F=Investi G=ValTotale H=Perf%
-    const cryptoRows = await fetchTab('Crypto');
-    if (cryptoRows) {
-      cryptoRows.slice(1).forEach(row => {
-        const ticker = t(row[0]);
-        if (!ticker || ticker.toUpperCase() === 'TOTAL') return;
-        const nom = t(row[1]) || ticker;
-        const qty = p(row[2]); const prix = p(row[4]);
-        if (qty === 0 && prix === 0) return;
-        assets.push({ name:`${nom} (${ticker})`, ticker, source:'sheets-crypto', type:'crypto',
-          qty, buyPrice:p(row[3]), currentPrice:prix, investi:p(row[5]), valTotale:p(row[6]),
-          perfTotal:p(row[7]), geo:'other', sector:'crypto', currency:'EUR', fees:0 });
-        imported++;
-      });
+    function renderAnalysisCharts(geos,sectors,totalVal) {
+      if(typeof assets==='undefined'||!assets.length) return;
+      const COLORS=['#c8f25a','#5af2c8','#f25a8a','#60a5fa','#fbbf24','#a78bfa','#fb923c','#34d399'];
+      if(!window._anaCharts) window._anaCharts={};
+      const mkD=(id,labels,data)=>{
+        if(window._anaCharts[id]) window._anaCharts[id].destroy();
+        const ctx=document.getElementById(id)?.getContext('2d'); if(!ctx) return;
+        window._anaCharts[id]=new Chart(ctx,{type:'doughnut',data:{labels,datasets:[{data,backgroundColor:COLORS,borderColor:getComputedStyle(document.documentElement).getPropertyValue('--surface')||'#111116',borderWidth:2}]},options:{responsive:true,maintainAspectRatio:false,cutout:'65%',plugins:{legend:{position:'bottom',labels:{color:getComputedStyle(document.documentElement).getPropertyValue('--muted2')||'#71717a',font:{size:10},boxWidth:10,padding:8}}}}});
+      };
+      const typeMap={},typeNames={stock:'Actions/ETF',crypto:'Crypto',savings:'Epargne',esop:'ESOP/PER'};
+      assets.forEach(a=>{const t=a.type||'stock';typeMap[t]=(typeMap[t]||0)+(a.qty||1)*(a.currentPrice||0);});
+      mkD('chartAllocation',Object.keys(typeMap).map(k=>typeNames[k]||k),Object.values(typeMap).map(v=>v/totalVal*100));
+      mkD('chartGeo',Object.keys(geos),Object.values(geos).map(v=>v/totalVal*100));
+      mkD('chartSector',Object.keys(sectors),Object.values(sectors).map(v=>v/totalVal*100));
+      const srcMap={};
+      assets.forEach(a=>{const s=a.source||'manual';srcMap[s]=(srcMap[s]||0)+(a.qty||1)*(a.currentPrice||0);});
+      mkD('chartSource',Object.keys(srcMap),Object.values(srcMap).map(v=>v/totalVal*100));
+      const currMap={};
+      assets.forEach(a=>{const c=a.currency||'EUR';currMap[c]=(currMap[c]||0)+(a.qty||1)*(a.currentPrice||0);});
+      mkD('chartCurrency',Object.keys(currMap),Object.values(currMap).map(v=>v/totalVal*100));
+      const thr=(typeof settings!=='undefined'&&settings.exposureThreshold)||20;
+      const alerts=assets.filter(a=>(a.qty||1)*(a.currentPrice||0)/totalVal*100>thr).map(a=>({name:a.name||a.ticker||'?',pct:(a.qty||1)*(a.currentPrice||0)/totalVal*100})).sort((a,b)=>b.pct-a.pct);
+      const alEl=document.getElementById('concentrationAlerts');
+      if(alEl) alEl.innerHTML=alerts.length?alerts.map(a=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);"><span style="font-size:13px;font-weight:500;">${a.name}</span><span class="badge badge-down">${a.pct.toFixed(1)}%</span></div>`).join(''):'<div style="font-size:13px;color:var(--green);padding:12px 0;">Aucune concentration excessive.</div>';
     }
 
-    // DIVIDENDES — "Suivi CTO 2026" col I(8)=Date J(9)=Société K(10)=Montant L(11)=Div/action
-    const suiviRows = await fetchTab('Suivi CTO 2026');
-    if (suiviRows) {
-      const divs = [];
-      suiviRows.slice(1).forEach(row => {
-        const societe = t(row[9]); const montant = p(row[10]);
-        if (!societe || societe.toUpperCase() === 'TOTAL' || montant <= 0) return;
-        const serial = parseFloat(row[8]);
-        let dateStr = '';
-        if (!isNaN(serial) && serial > 40000) {
-          dateStr = new Date(Math.round((serial-25569)*86400*1000)).toLocaleDateString('fr-FR');
-        } else { dateStr = t(row[8]); }
-        divs.push({ date:dateStr, ticker:societe, amount:montant, divPerShare:p(row[11]), source:'sheets' });
-      });
-      if (divs.length) localStorage.setItem('patrimonia_dividends', JSON.stringify(divs));
+    function calculateTax() {
+      const age=parseInt(document.getElementById('taxAge')?.value)||30;
+      const sit=document.getElementById('taxSituation')?.value||'single';
+      const grossAnn=parseFloat(document.getElementById('taxGross')?.value)||0;
+      const otherRev=parseFloat(document.getElementById('taxOther')?.value)||0;
+      const capGain=parseFloat(document.getElementById('taxCapGain')?.value)||0;
+      const dividends=parseFloat(document.getElementById('taxDividends')?.value)||0;
+      const perVers=parseFloat(document.getElementById('taxPer')?.value)||0;
+      const dons=parseFloat(document.getElementById('taxDons')?.value)||0;
+      const profile=currentFiscalProfile;
+      const fmtE=v=>new Intl.NumberFormat('fr-FR',{style:'currency',currency:'EUR',maximumFractionDigits:0}).format(v);
+      const fmtP=v=>`${(v*100).toFixed(0)}%`;
+      let exemptions=[],exempted=0;
+      if(profile==='apprenti'){const a=parseFloat(document.getElementById('taxAppSalary')?.value)||0;const e=Math.min(a,20815);exempted=e;if(e>0)exemptions.push(`Exo. apprenti : ${fmtE(e)} non imposables`);}
+      if(profile==='etudiant'&&age<26){const si=parseFloat(document.getElementById('taxStudentIncome')?.value)||0;const e=Math.min(si,62445);exempted=e;if(e>0)exemptions.push(`Exo. job etudiant : ${fmtE(e)} exoneres`);}
+      if(profile==='retraite'&&age>=65) exemptions.push('Abattement retraite 65+ : 2 446 EUR/an');
+      const parts={single:1,pacs:2,married:2,single_parent1:1.5,single_parent2:2,married_children1:2.5,married_children2:3,married_children3:4};
+      const nbP=parts[sit]||1;
+      let rev=Math.max(0,grossAnn-exempted)+otherRev;
+      const abatt=Math.min(Math.max(rev*0.1,472),14171);
+      rev=Math.max(0,rev-abatt);
+      const dPer=Math.min(perVers,Math.max(grossAnn*0.1,4052)), dDons=dons*0.66;
+      rev=Math.max(0,rev-dPer);
+      const TRANCHES=[{min:0,max:11294,t:0},{min:11294,max:28797,t:0.11},{min:28797,max:82341,t:0.30},{min:82341,max:177106,t:0.41},{min:177106,max:Infinity,t:0.45}];
+      const q=rev/nbP;let irPart=0,tmi=0;const bkd=[];
+      for(const tr of TRANCHES){if(q<=tr.min)break;const base=Math.min(q,tr.max)-tr.min;const imp=base*tr.t;irPart+=imp;if(tr.t>0){tmi=tr.t;bkd.push({t:tr.t,base,imp:imp*nbP});}}
+      let ir=irPart*nbP;
+      if(sit==='single'&&ir<1929) ir=Math.max(0,ir-(1929-ir)*0.4525);
+      ir=Math.max(0,ir-dDons);
+      const ft=(capGain+dividends)*0.30, total=ir+ft;
+      const teff=(grossAnn+otherRev+capGain+dividends)>0?total/(grossAnn+otherRev+capGain+dividends)*100:0;
+      const set=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
+      set('taxResult',fmtE(total)); set('taxRate',`${teff.toFixed(1)}%`); set('taxTMI',`Tranche marginale : ${fmtP(tmi)}`);
+      const exW=document.getElementById('taxExemptionResult'),exD=document.getElementById('taxExemptionDetail');
+      if(exemptions.length&&exW){exW.style.display='block';exD.innerHTML=exemptions.map(e=>'• '+e).join('<br>');}else if(exW)exW.style.display='none';
+      const bEl=document.getElementById('taxBreakdown');
+      if(bEl)bEl.innerHTML='<div>'+bkd.map(b=>`<div style="display:flex;justify-content:space-between;font-size:13px;padding:8px 0;border-bottom:1px solid var(--border);"><span>Tranche ${fmtP(b.t)}</span><span style="font-weight:500;">${fmtE(b.imp)}</span></div>`).join('')+(abatt>0?`<div style="font-size:12px;color:var(--green);padding:6px 0;">Abattement 10% : -${fmtE(abatt)}</div>`:'')+( dPer>0?`<div style="font-size:12px;color:var(--green);padding:6px 0;">Deduction PER : -${fmtE(dPer)}</div>`:'')+((capGain+dividends)>0?`<div style="font-size:12px;padding:6px 0;">Flat Tax (30%) : ${fmtE(ft)}</div>`:'')+' </div>';
+      const fvEl=document.getElementById('taxFlatvsBareme');
+      if(fvEl&&(capGain+dividends)>0){const bv=(capGain+dividends)*(tmi+0.172);const best=ft<=bv?'Flat Tax (30%)':'Bareme IR';fvEl.innerHTML=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;"><div style="padding:12px;border-radius:8px;background:${ft<=bv?'rgba(34,197,94,0.06)':'var(--surface2)'};border:1px solid ${ft<=bv?'rgba(34,197,94,0.2)':'var(--border)'};"><div style="font-size:11px;color:var(--muted2);margin-bottom:4px;">Flat Tax 30%</div><div style="font-size:18px;font-weight:600;color:${ft<=bv?'var(--green)':'var(--text)'};">${fmtE(ft)}</div></div><div style="padding:12px;border-radius:8px;background:${bv<ft?'rgba(34,197,94,0.06)':'var(--surface2)'};border:1px solid ${bv<ft?'rgba(34,197,94,0.2)':'var(--border)'};"><div style="font-size:11px;color:var(--muted2);margin-bottom:4px;">Bareme IR + PS</div><div style="font-size:18px;font-weight:600;color:${bv<ft?'var(--green)':'var(--text)'};">${fmtE(bv)}</div></div></div><div style="margin-top:10px;font-size:12px;color:var(--accent2);font-weight:500;">Recommande : ${best}</div>`;}
+      else if(fvEl)fvEl.innerHTML='<div class="text-xs color-muted" style="padding:8px 0;">Renseignez vos plus-values pour comparer.</div>';
+      const opEl=document.getElementById('taxOptimizations');
+      if(opEl){const opts=[];
+        if(ir>500&&perVers<2000)opts.push({i:'📙',t:'Investissez dans un PER',d:`Economisez jusqu'a ${fmtE(2000*tmi)} en versant 2 000 EUR/an dans un PER.`,c:'var(--gold)'});
+        if(tmi>=0.3)opts.push({i:'📗',t:'Ouvrez un PEA',d:'Plus-values exonerees d\'IR apres 5 ans. Plafond 150 000 EUR.',c:'var(--green)'});
+        if(profile==='apprenti')opts.push({i:'🎓',t:'Exoneration apprenti',d:'Votre salaire < 1 SMIC est totalement exonere. Investissez la difference sur un PEA jeune.',c:'var(--accent2)'});
+        if(profile==='etudiant'&&age<26)opts.push({i:'📚',t:'Exoneration job etudiant',d:'Vos revenus < 3 SMIC sont exoneres. Commencez a epargner des maintenant.',c:'var(--accent2)'});
+        if(!dons)opts.push({i:'❤️',t:'Reduction via dons',d:'Dons aux associations : reduction d\'impot de 66% du montant.',c:'#f472b6'});
+        if(!opts.length)opts.push({i:'✅',t:'Situation optimisee',d:'Votre situation fiscale semble deja bien optimisee.',c:'var(--green)'});
+        opEl.innerHTML=opts.map(o=>`<div style="display:flex;gap:12px;padding:12px 0;border-bottom:1px solid var(--border);"><span style="font-size:20px;flex-shrink:0;">${o.i}</span><div><div style="font-size:13px;font-weight:600;color:${o.c};margin-bottom:3px;">${o.t}</div><div style="font-size:12px;color:var(--muted2);line-height:1.5;">${o.d}</div></div></div>`).join('');}
+      ['peaStatus','avStatus','perStatus'].forEach((id,i)=>{const el=document.getElementById(id);if(!el)return;const labels=[['Recommande','Actions/ETF exoneres d\'IR apres 5 ans (17.2% PS).'],['Utile pour transmission','Abattement 4 600 EUR/an apres 8 ans.'],[tmi>=0.3?'Tres recommande (TMI 30%+)':'Utile si TMI augmente',`Economie = versement x ${Math.round(tmi*100)}% TMI.`]];const colors=['var(--green)','var(--accent2)',tmi>=0.3?'var(--green)':'var(--gold)'];el.innerHTML=`<div style="font-size:13px;color:${colors[i]};font-weight:500;">${labels[i][0]}</div><div class="text-xs color-muted mt-8">${labels[i][1]}</div>`;});
     }
 
-    saveLocalData(); initOverview();
-    const statusEl = document.getElementById('sheetsStatus');
-    if (statusEl) { statusEl.textContent='Connecté'; statusEl.className='badge badge-up'; }
-    const det = document.getElementById('dashboardDetected');
-    if (det) det.style.display='block';
-    showToast(imported+' actifs import\u00E9s \u2713', '#22c55e');
-    autoFillFiscalFromSalary();
+    function updatePerSim() {
+      const v=parseInt(document.getElementById('perSimSlider')?.value)||2000, tmi=0.30;
+      const e=Math.round(v*tmi);
+      const fmtE=v=>new Intl.NumberFormat('fr-FR',{style:'currency',currency:'EUR',maximumFractionDigits:0}).format(v);
+      const el=document.getElementById('perSimResult');
+      if(el)el.innerHTML=`<div style="padding:14px;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.2);border-radius:8px;"><div class="text-xs color-muted" style="margin-bottom:4px;">Economie d'impot estimee / an</div><div style="font-size:22px;font-weight:600;color:var(--green);">${fmtE(e)}</div><div class="text-xs color-muted mt-8">Base sur une TMI de ${Math.round(tmi*100)}%.</div></div>`;
+    }
+  </script>
 
-  } catch(err) {
-    showToast('Erreur : '+err.message, '#ef4444'); console.error(err);
-  } finally {
-    if (btn) btn.textContent='\u2B07 Importer mon Google Sheet';
-  }
-}
-
-
-async function connectBinance() {
-  const manual=document.getElementById('binanceManual')?.value?.trim();
-  if(!manual) return showToast('Entrez vos soldes','#ef4444');
-  const pairs=manual.split(',').map(s=>s.trim()).filter(Boolean);
-  const cgIds={btc:'bitcoin',eth:'ethereum',bnb:'binancecoin',sol:'solana',xrp:'ripple',ada:'cardano',cro:'crypto-com-chain',matic:'matic-network',avax:'avalanche-2',dot:'polkadot'};
-  try {
-    const ids=pairs.map(p=>cgIds[p.split(':')[0].toLowerCase()]||p.split(':')[0].toLowerCase()).join(',');
-    const res=await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=eur`);
-    const prices=await res.json();
-    pairs.forEach(p=>{
-      const [coin,qtyStr]=p.split(':'), qty=parseFloat(qtyStr)||0;
-      const cgId=cgIds[coin.toLowerCase()]||coin.toLowerCase(), price=prices[cgId]?.eur||0;
-      const idx=assets.findIndex(a=>a.name?.toLowerCase()===coin.toLowerCase()&&a.source==='binance');
-      const asset={name:coin.toUpperCase(),source:'binance',type:'crypto',qty,buyPrice:price,currentPrice:price,geo:'other',sector:'crypto',currency:'EUR',fees:0};
-      if(idx>=0) assets[idx]=asset; else assets.push(asset);
-    });
-    saveLocalData(); initOverview();
-    document.getElementById('binanceStatus').textContent='Connecté';
-    document.getElementById('binanceStatus').className='badge badge-up';
-    showToast('Binance importé ✓','#22c55e');
-  } catch(err){ showToast('Erreur prix : '+err.message,'#ef4444'); }
-}
-
-function connectCrypto() {
-  const manual=document.getElementById('cryptoManual')?.value?.trim();
-  if(!manual) return showToast('Entrez vos soldes','#ef4444');
-  manual.split(',').forEach(p=>{
-    const [coin,qtyStr]=p.trim().split(':'); if(!coin) return;
-    const idx=assets.findIndex(a=>a.name?.toLowerCase()===coin.toLowerCase()&&a.source==='crypto');
-    const asset={name:coin.toUpperCase(),source:'crypto',type:'crypto',qty:parseFloat(qtyStr)||0,buyPrice:0,currentPrice:0,geo:'other',sector:'crypto',currency:'EUR',fees:0};
-    if(idx>=0) assets[idx]=asset; else assets.push(asset);
-  });
-  saveLocalData(); initOverview();
-  document.getElementById('cryptoStatus').textContent='Connecté';
-  document.getElementById('cryptoStatus').className='badge badge-up';
-  showToast('Crypto.com importé ✓','#22c55e');
-}
-
-function connectTR() { showToast('Import PDF Trade Republic — en développement','#f59e0b'); }
-
-// ─── PARAMÈTRES ──────────────────────────────────────────────────────────
-
-function saveSettings() {
-  settings.currency=document.getElementById('currency')?.value||'EUR';
-  settings.exposureThreshold=parseInt(document.getElementById('exposureThreshold')?.value)||20;
-  saveLocalData(); showToast('Paramètres sauvegardés ✓','#22c55e');
-}
-
-// ─── DIVIDENDES ──────────────────────────────────────────────────────────
-
-function renderDividendsOverview() {
-  const divEl = document.getElementById('dividendsOverview');
-  if (!divEl) return;
-  // Dividendes enregistrés manuellement ou depuis Sheets
-  let divs = [];
-  try { divs = JSON.parse(localStorage.getItem('patrimonia_dividends')||'[]'); } catch(e){}
-  // Calcul dividendes annuels estimés depuis les actifs
-  const annualDivs = assets.filter(a => (a.dividend||0) > 0).map(a => ({
-    name: a.name||a.ticker||'?',
-    annual: (a.qty||1) * (a.dividend||0),
-    yield: a.currentPrice > 0 ? ((a.dividend||0)/a.currentPrice*100).toFixed(2) : '–'
-  }));
-  const totalAnnual = annualDivs.reduce((s,d)=>s+d.annual,0);
-  if (!divs.length && !annualDivs.length) {
-    divEl.innerHTML = '<div style="font-size:13px;color:var(--muted2);padding:8px 0;">Aucun dividende enregistré. Renseignez le montant de dividende/action dans votre Google Sheet (col. F).</div>';
-    return;
-  }
-  let html = '';
-  if (totalAnnual > 0) {
-    html += `<div style="margin-bottom:12px;padding:12px;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.15);border-radius:8px;">
-      <div style="font-size:11px;color:var(--muted2);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">Dividendes estimés / an</div>
-      <div style="font-size:22px;font-weight:600;color:var(--green);">${fmt.format(totalAnnual)}</div>
-      <div style="font-size:11px;color:var(--muted2);">soit ${fmt.format(totalAnnual/12)}/mois</div>
-    </div>`;
-    html += annualDivs.map(d=>`<div class="fee-item"><div style="flex:1"><div style="font-size:13px;font-weight:500;">${d.name}</div><div style="font-size:11px;color:var(--muted2);">Rendement ${d.yield}%</div></div><div style="font-weight:600;color:var(--green);">${fmt.format(d.annual)}/an</div></div>`).join('');
-  }
-  if (divs.length) {
-    html += `<div style="font-size:12px;font-weight:600;color:var(--muted2);margin:12px 0 6px;text-transform:uppercase;letter-spacing:0.5px;">Historique reçu</div>`;
-    html += divs.slice(-5).reverse().map(d=>`<div class="fee-item"><div><div style="font-size:13px;font-weight:500;">${d.ticker||'?'}</div><div style="font-size:11px;color:var(--muted2);">${d.date||''}</div></div><div style="font-weight:600;color:var(--green);">${fmt.format(d.amount)}</div></div>`).join('');
-  }
-  divEl.innerHTML = html;
-}
-
-// ─── AUTO-REMPLISSAGE FISCALITÉ ──────────────────────────────────────────
-
-function autoFillFiscalFromSalary() {
-  if (!salaryData) return;
-  // Salaire brut annuel
-  const grossAnn = (salaryData.gross||0)*12;
-  const el = document.getElementById('taxGross');
-  if (el && !el.value && grossAnn > 0) el.value = grossAnn;
-  // Intéressement/participation
-  const otherAnn = (salaryData.inter||0) + (salaryData.part||0);
-  const elOther = document.getElementById('taxOther');
-  if (elOther && !elOther.value && otherAnn > 0) elOther.value = otherAnn;
-  // Dividendes annuels estimés
-  const annualDivs = assets.filter(a=>(a.dividend||0)>0).reduce((s,a)=>s+(a.qty||1)*(a.dividend||0),0);
-  const elDiv = document.getElementById('taxDividends');
-  if (elDiv && !elDiv.value && annualDivs > 0) elDiv.value = Math.round(annualDivs);
-  // Versements PER depuis Airbus (PERCOL)
-  const perVers = salaryData.abond ? salaryData.abond * 12 : 0;
-  const elPer = document.getElementById('taxPer');
-  if (elPer && !elPer.value && perVers > 0) elPer.value = Math.round(perVers);
-}
-
-// ─── ANALYSE ─────────────────────────────────────────────────────────────
-
-function renderAnalysisPage() {
-  if (typeof assets === 'undefined' || !assets.length) {
-    ['chartGeo','chartSector','chartCurrency','chartAllocation'].forEach(id=>{
-      const ctx=document.getElementById(id); if(ctx){const c=ctx.getContext('2d');c.clearRect(0,0,ctx.width,ctx.height);}
-    });
-    const el=document.getElementById('concentrationAlerts');
-    if(el) el.innerHTML='<div style="font-size:13px;color:var(--muted);padding:12px 0;">Ajoutez des actifs pour voir l\'analyse.</div>';
-    return;
-  }
-  // computeDiversityScore is defined inline in dashboard.html, just ensure it runs
-  if (typeof computeDiversityScore === 'function') computeDiversityScore();
-}
-
-// ─── SIMULATION DE PRÊT ──────────────────────────────────────────────────
-
-const BANK_RATES = {
-  'BNP Paribas':       { rate20: 3.65, rate25: 3.80, fee: 1.0 },
-  'Crédit Agricole':   { rate20: 3.55, rate25: 3.70, fee: 0.8 },
-  'Société Générale':  { rate20: 3.70, rate25: 3.85, fee: 1.0 },
-  'LCL':               { rate20: 3.60, rate25: 3.75, fee: 0.9 },
-  'Caisse d\'Épargne': { rate20: 3.50, rate25: 3.65, fee: 0.7 },
-  'Banque Populaire':  { rate20: 3.55, rate25: 3.72, fee: 0.8 },
-  'CIC':               { rate20: 3.68, rate25: 3.82, fee: 0.9 },
-  'ING':               { rate20: 3.45, rate25: 3.60, fee: 0.5 },
-  'Boursorama':        { rate20: 3.40, rate25: 3.55, fee: 0.3 },
-  'Hello Bank':        { rate20: 3.42, rate25: 3.57, fee: 0.4 },
-};
-
-function updateLoanCalc() {
-  // Auto-populate from salaryData if fields are empty
-  const loanNetInput = document.getElementById('loanNet');
-  if (loanNetInput && !loanNetInput.value && salaryData.net) loanNetInput.value = salaryData.net;
-  const loanExpInput = document.getElementById('loanMensExp');
-  if (loanExpInput && !loanExpInput.value && expenses.length) {
-    loanExpInput.value = expenses.reduce((s,e)=>s+(e.amount||0),0);
-  }
-
-  const net   = parseFloat(document.getElementById('loanNet')?.value)   || (salaryData.net||0);
-  const aides = (salaryData.apl||0)+(salaryData.caf||0)+(salaryData.transport||0)+(salaryData.tr||0)+(salaryData.other||0);
-  const totalRevenu = net + aides;
-  const apport    = parseFloat(document.getElementById('loanApport')?.value)   || 0;
-  const duree     = parseInt(document.getElementById('loanDuree')?.value)      || 20;
-  const prixBien  = parseFloat(document.getElementById('loanPrix')?.value)     || 0;
-  const mensExp   = parseFloat(document.getElementById('loanMensExp')?.value)  || expenses.reduce((s,e)=>s+(e.amount||0),0);
   
-  if (!net) {
-    const el=document.getElementById('loanNetDisplay'); if(el) el.textContent='–';
-    return;
-  }
-
-  // Capacité d'endettement max (33% des revenus nets)
-  const maxMens = totalRevenu * 0.33 - mensExp;
-  const loanNet_el = document.getElementById('loanNetDisplay');
-  if (loanNet_el) loanNet_el.textContent = fmt.format(totalRevenu) + '/mois';
-
-  // Calcul capacité d'emprunt pour chaque banque
-  const tbody = document.getElementById('loanBankTbody');
-  if (!tbody) return;
-
-  let rows = '';
-  Object.entries(BANK_RATES).forEach(([bank, b]) => {
-    const rate = (duree <= 20 ? b.rate20 : b.rate25) / 100 / 12;
-    const n = duree * 12;
-    // Capacité max basée sur mensualité max
-    const capMax = maxMens > 0 ? Math.round(maxMens * (1 - Math.pow(1+rate,-n)) / rate) + apport : 0;
-    // Mensualité pour le prix du bien demandé
-    const montantEmprunt = Math.max(0, prixBien - apport);
-    const mensualite = montantEmprunt > 0 ? Math.round(montantEmprunt * rate / (1 - Math.pow(1+rate,-n))) : 0;
-    const tauxEndet = totalRevenu > 0 ? ((mensualite + mensExp) / totalRevenu * 100).toFixed(1) : '–';
-    const coutTotal = mensualite > 0 ? Math.round(mensualite * n + b.fee/100 * montantEmprunt - montantEmprunt) : 0;
-    const feasible = montantEmprunt > 0 ? mensualite + mensExp <= totalRevenu * 0.35 : true;
-    const color = feasible ? 'var(--green)' : 'var(--danger)';
-    const taux = (duree <= 20 ? b.rate20 : b.rate25).toFixed(2);
-    rows += `<tr>
-      <td style="font-weight:500;">${bank}</td>
-      <td style="color:var(--accent2);">${taux}%</td>
-      <td style="font-weight:600;color:var(--accent2);">${capMax>0?fmt.format(capMax):'–'}</td>
-      <td>${montantEmprunt>0?fmt.format(mensualite)+'/mois':'–'}</td>
-      <td style="color:${color};">${tauxEndet}%</td>
-      <td style="color:var(--muted2);font-size:12px;">${coutTotal>0?fmt.format(coutTotal):'–'}</td>
-      <td><span class="badge ${feasible?'badge-up':'badge-down'}">${feasible?'✓ Possible':'✗ Serré'}</span></td>
-    </tr>`;
-  });
-  tbody.innerHTML = rows || '<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:16px;">Renseignez votre salaire pour comparer</td></tr>';
-
-  // KPIs
-  const bestRate = Math.min(...Object.values(BANK_RATES).map(b=>duree<=20?b.rate20:b.rate25));
-  safeSet('loanCapacite', maxMens > 0 ? fmt.format(Math.round(maxMens * (1 - Math.pow(1+(bestRate/100/12),-(duree*12))) / (bestRate/100/12)) + apport) : '–');
-  safeSet('loanMensMax', fmt.format(Math.max(0,maxMens)));
-  safeSet('loanTauxEndet', maxMens > 0 ? '33%' : '–');
-}
-
-function exportData() {
-  const blob=new Blob([JSON.stringify({assets,savings,expenses,salaryData,settings},null,2)],{type:'application/json'});
-  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='patrimonia_export.json'; a.click();
-}
-
-function importData() { document.getElementById('importFile')?.click(); }
-
-function handleImport(event) {
-  const file=event.target.files[0]; if(!file) return;
-  const reader=new FileReader();
-  reader.onload=e=>{
-    try {
-      const d=JSON.parse(e.target.result);
-      if(d.assets)    assets=d.assets;
-      if(d.savings)   savings=d.savings;
-      if(d.expenses)  expenses=d.expenses;
-      if(d.salaryData) salaryData=d.salaryData;
-      if(d.settings)  settings=d.settings;
-      saveLocalData(); initOverview(); showToast('Données importées ✓','#22c55e');
-    } catch(err){ showToast('Fichier invalide','#ef4444'); }
-  };
-  reader.readAsText(file);
-}
-
-function clearData() {
-  if(!confirm('Réinitialiser ? Action irréversible.')) return;
-  ['patrimonia_assets','patrimonia_savings','patrimonia_expenses','patrimonia_salary','patrimonia_settings'].forEach(k=>localStorage.removeItem(k));
-  loadLocalData(); initOverview(); showToast('Données réinitialisées','#f59e0b');
-}
-
-// ─── SUPPRESSION COMPTE ──────────────────────────────────────────────────
-
-function checkDeleteConfirm() {
-  const val = document.getElementById('deleteConfirmText')?.value || '';
-  const btn = document.getElementById('deleteAccountBtn');
-  if (!btn) return;
-  const ok = val.trim().toUpperCase() === 'SUPPRIMER';
-  btn.disabled = !ok;
-  btn.style.opacity = ok ? '1' : '0.4';
-  btn.style.cursor  = ok ? 'pointer' : 'not-allowed';
-}
-
-function deleteAccount() {
-  closeModal('deleteAccount');
-  document.getElementById('deletePassword').value = '';
-  document.getElementById('deleteErrorMsg').style.display = 'none';
-  openModal('deletePassword');
-}
-
-async function confirmDeleteAccount() {
-  const password = document.getElementById('deletePassword')?.value?.trim();
-  const errEl    = document.getElementById('deleteErrorMsg');
-  const btnEl    = document.getElementById('deletePasswordBtn');
-  if (!password) { if(errEl){errEl.textContent='Entrez votre mot de passe.';errEl.style.display='block';} return; }
-  if (btnEl) { btnEl.textContent = 'Suppression...'; btnEl.disabled = true; }
-  try {
-    // 1. Ré-authentifier
-    const { data: { session } } = await sb.auth.getSession();
-    const email = session?.user?.email;
-    if (!email) throw new Error('Session expirée, reconnectez-vous.');
-    const { error: signInErr } = await sb.auth.signInWithPassword({ email, password });
-    if (signInErr) throw new Error('Mot de passe incorrect.');
-    // 2. Effacer les données locales
-    ['patrimonia_assets','patrimonia_savings','patrimonia_expenses','patrimonia_salary','patrimonia_settings','patrimonia_dividends','patrimonia_theme'].forEach(k=>localStorage.removeItem(k));
-    // 3. Supprimer le compte Supabase
-    const { error: delErr } = await sb.auth.admin?.deleteUser(session.user.id)
-      .catch(()=>({error:null})) || {};
-    // 4. Déconnexion propre (même si delete échoue, l'user est déconnecté)
-    await sb.auth.signOut();
-    showToast('Compte supprimé. Au revoir !', '#22c55e');
-    setTimeout(()=>{ window.location.href='index.html'; }, 2000);
-  } catch(err) {
-    if(errEl){ errEl.textContent = err.message; errEl.style.display='block'; }
-    if(btnEl){ btnEl.textContent='Supprimer mon compte'; btnEl.disabled=false; }
-  }
-}
-
-// ─── IMPORT FICHIER CSV / XLSX / JSON ────────────────────────────────────
-
-let _pendingFileAssets = [];
-
-function handleFileDrop(event) {
-  event.preventDefault();
-  document.getElementById('fileDropZone').style.borderColor = 'var(--border2)';
-  const file = event.dataTransfer.files[0];
-  if (file) processImportFile(file);
-}
-
-function handleFileImport(event) {
-  const file = event.target.files[0];
-  if (file) processImportFile(file);
-}
-
-function processImportFile(file) {
-  const ext = file.name.split('.').pop().toLowerCase();
-  const preview = document.getElementById('fileImportPreview');
-  const status  = document.getElementById('fileImportStatus');
-  if (preview) preview.innerHTML = '<div style="font-size:12px;color:var(--muted2);">Lecture du fichier...</div>';
-
-  if (ext === 'json') {
-    const reader = new FileReader();
-    reader.onload = e => {
-      try {
-        const d = JSON.parse(e.target.result);
-        // JSON Patrimonia export
-        if (d.assets) {
-          if(d.assets) assets=d.assets;
-          if(d.savings) savings=d.savings;
-          if(d.expenses) expenses=d.expenses;
-          if(d.salaryData) salaryData=d.salaryData;
-          if(d.settings) settings=d.settings;
-          saveLocalData(); initOverview();
-          if(status){status.textContent='Importé';status.className='badge badge-up';}
-          if(preview) preview.innerHTML=`<div style="font-size:12px;color:var(--green);">${assets.length} actifs importés depuis JSON ✓</div>`;
-          showToast('Données JSON importées ✓','#22c55e');
-        } else {
-          // JSON tableau d'actifs
-          const arr = Array.isArray(d) ? d : [];
-          _pendingFileAssets = arr;
-          showFilePreview(arr, file.name);
-        }
-      } catch(err){ if(preview) preview.innerHTML=`<div style="font-size:12px;color:var(--danger);">Erreur: ${err.message}</div>`; }
-    };
-    reader.readAsText(file);
-  } else if (ext === 'csv') {
-    const reader = new FileReader();
-    reader.onload = e => {
-      const parsed = parseCSV(e.target.result);
-      _pendingFileAssets = parsed;
-      showFilePreview(parsed, file.name);
-    };
-    reader.readAsText(file, 'UTF-8');
-  } else if (ext === 'xlsx' || ext === 'xls') {
-    // XLSX nécessite la librairie SheetJS — on charge dynamiquement
-    if (typeof XLSX === 'undefined') {
-      const script = document.createElement('script');
-      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
-      script.onload = () => readXLSX(file);
-      script.onerror = () => { if(preview) preview.innerHTML='<div style="font-size:12px;color:var(--danger);">Impossible de charger le lecteur XLSX. Vérifiez votre connexion.</div>'; };
-      document.head.appendChild(script);
-    } else {
-      readXLSX(file);
-    }
-  } else {
-    if(preview) preview.innerHTML='<div style="font-size:12px;color:var(--danger);">Format non supporté. Utilisez CSV, XLSX ou JSON.</div>';
-  }
-}
-
-function readXLSX(file) {
-  const preview = document.getElementById('fileImportPreview');
-  const reader = new FileReader();
-  reader.onload = e => {
-    try {
-      const wb = XLSX.read(e.target.result, { type:'array' });
-      // Cherche d'abord CTO, puis prend le premier onglet
-      const sheetName = wb.SheetNames.includes('CTO') ? 'CTO'
-                      : wb.SheetNames.includes('Crypto') ? 'Crypto'
-                      : wb.SheetNames[0];
-      const ws = wb.Sheets[sheetName];
-      const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:'' });
-      // Détecter si structure Patrimonia (Ticker en col A, Nom en col B)
-      const detected = [];
-      rows.slice(1).forEach(row => {
-        const ticker = (row[0]||'').toString().trim();
-        if (!ticker || ticker.toUpperCase() === 'TOTAL') return;
-        const nom = (row[1]||ticker).toString().trim();
-        const qty  = parseFloat((row[2]||'0').toString()) || 0;
-        const pru  = parseFloat((row[3]||'0').toString()) || 0;
-        const prix = parseFloat((row[4]||'0').toString()) || 0;
-        if (qty === 0 && prix === 0) return;
-        detected.push({ ticker, nom, qty, pru, prix,
-          investi:  parseFloat((row[5]||'0').toString()) || 0,
-          valTotale:parseFloat((row[6]||'0').toString()) || 0,
-          perf1d:   parseFloat((row[7]||'0').toString()) || 0,
-          perfYtd:  parseFloat((row[11]||'0').toString()) || 0,
-          secteur:  (row[14]||'').toString(),
-          geo:      (row[15]||'').toString(),
-          devise:   (row[23]||'EUR').toString() || 'EUR',
-          type:     sheetName.toLowerCase().includes('rypto') ? 'crypto' : sheetName.toLowerCase().includes('irbus') ? 'esop' : 'stock',
-          source:   'file-' + sheetName.toLowerCase(),
-        });
+  <script>
+    // Service Worker : désenregistre l'ancien cache cassé puis réenregistre
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(regs => {
+        regs.forEach(reg => reg.unregister());
+      }).then(() => {
+        navigator.serviceWorker.register('sw.js').catch(() => {});
       });
-      _pendingFileAssets = detected;
-      showFilePreview(detected, file.name + ' [' + sheetName + ']');
-    } catch(err){ if(preview) preview.innerHTML=`<div style="font-size:12px;color:var(--danger);">Erreur XLSX: ${err.message}</div>`; }
-  };
-  reader.readAsArrayBuffer(file);
-}
+    }
+  </script>
 
-function parseCSV(text) {
-  const lines = text.replace(/\r/g,'').split('\n').filter(l=>l.trim());
-  if (!lines.length) return [];
-  // Détect séparateur (virgule ou point-virgule ou tab)
-  const sep = lines[0].includes('\t') ? '\t' : lines[0].split(';').length > lines[0].split(',').length ? ';' : ',';
-  const headers = lines[0].split(sep).map(h=>h.trim().replace(/^["']|["']$/g,'').toLowerCase());
-  const result = [];
-  const colIdx = (names) => { for(const n of names){ const i=headers.indexOf(n); if(i>=0)return i; } return -1; };
-  const iT = colIdx(['ticker','actif','symbole','symbol','isin']);
-  const iN = colIdx(['nom','name','libelle','libellé']);
-  const iQ = colIdx(['quantité','quantite','quantity','qté','qty']);
-  const iP = colIdx(['pru','prix achat','buy price','pa','prix moyen','cost']);
-  const iC = colIdx(['prix','price','cours','valeur unitaire','current price','prix actuel','cours actuel']);
-  const iV = colIdx(['val. totale','val totale','value','valeur','total value','montant']);
-  const iI = colIdx(['investi','invested','montant investi']);
-  lines.slice(1).forEach(line => {
-    const cols = line.split(sep).map(c=>c.trim().replace(/^["']|["']$/g,''));
-    const ticker = iT>=0 ? cols[iT] : cols[0];
-    if (!ticker || ticker.toUpperCase() === 'TOTAL') return;
-    const nom = iN>=0 ? cols[iN] : ticker;
-    const qty = parseFloat(cols[iQ>=0?iQ:2]) || 0;
-    const pru = parseFloat(cols[iP>=0?iP:3]) || 0;
-    const prix= parseFloat(cols[iC>=0?iC:4]) || 0;
-    if (qty===0 && prix===0) return;
-    result.push({ ticker, nom, qty, pru, prix,
-      investi:  iI>=0 ? parseFloat(cols[iI])||0 : qty*pru,
-      valTotale:iV>=0 ? parseFloat(cols[iV])||0 : qty*prix,
-      type:'stock', source:'file-csv' });
-  });
-  return result;
-}
-
-function showFilePreview(parsedAssets, filename) {
-  const preview = document.getElementById('fileImportPreview');
-  const status  = document.getElementById('fileImportStatus');
-  const btn     = document.getElementById('fileImportBtn');
-  if (!preview) return;
-  if (!parsedAssets.length) {
-    preview.innerHTML='<div style="font-size:12px;color:var(--danger);">Aucun actif détecté. Vérifiez le format.</div>';
-    return;
-  }
-  if(status){ status.textContent=parsedAssets.length+' actifs détectés'; status.className='badge badge-up'; }
-  if(btn){ btn.style.display='block'; }
-  const rows = parsedAssets.slice(0,8).map(a=>
-    `<tr><td style="font-size:12px;padding:4px 6px;font-weight:500;">${a.ticker||'?'}</td>
-     <td style="font-size:11px;padding:4px 6px;color:var(--muted2);">${(a.nom||'').substring(0,20)}</td>
-     <td style="font-size:12px;padding:4px 6px;">${a.qty||0}</td>
-     <td style="font-size:12px;padding:4px 6px;">${fmt.format(a.prix||0)}</td>
-     <td style="font-size:12px;padding:4px 6px;color:var(--green);">${fmt.format(a.valTotale||a.qty*a.prix||0)}</td></tr>`
-  ).join('');
-  preview.innerHTML = `
-    <div style="font-size:11px;color:var(--muted2);margin-bottom:6px;">Aperçu — ${filename} (${parsedAssets.length} lignes)</div>
-    <div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;">
-      <thead><tr>
-        <th style="font-size:10px;text-transform:uppercase;color:var(--muted);padding:4px 6px;text-align:left;">Ticker</th>
-        <th style="font-size:10px;text-transform:uppercase;color:var(--muted);padding:4px 6px;text-align:left;">Nom</th>
-        <th style="font-size:10px;text-transform:uppercase;color:var(--muted);padding:4px 6px;">Qté</th>
-        <th style="font-size:10px;text-transform:uppercase;color:var(--muted);padding:4px 6px;">Prix</th>
-        <th style="font-size:10px;text-transform:uppercase;color:var(--muted);padding:4px 6px;">Valeur</th>
-      </tr></thead>
-      <tbody>${rows}</tbody>
-    </table></div>
-    ${parsedAssets.length > 8 ? `<div style="font-size:11px;color:var(--muted2);margin-top:6px;">... et ${parsedAssets.length-8} autres actifs</div>` : ''}`;
-}
-
-function confirmFileImport() {
-  if (!_pendingFileAssets.length) return;
-  // Supprimer les anciens actifs de la même source
-  const firstSrc = _pendingFileAssets[0]?.source || 'file';
-  assets = assets.filter(a => a.source !== firstSrc);
-  // Ajouter les nouveaux
-  _pendingFileAssets.forEach(a => {
-    const geoRaw = (a.geo||'').toLowerCase();
-    const geoMap = {'usa':'us','etats-unis':'us','états-unis':'us','europe':'eu','france':'fr','monde':'world','emergent':'em','emergents':'em'};
-    const secRaw = (a.secteur||'').toLowerCase();
-    assets.push({
-      name: a.nom && a.nom !== a.ticker ? `${a.nom} (${a.ticker})` : a.ticker,
-      ticker: a.ticker,
-      source: a.source || 'file',
-      type:   a.type || 'stock',
-      qty:    a.qty, buyPrice: a.pru, currentPrice: a.prix,
-      investi: a.investi, valTotale: a.valTotale,
-      perf1d:  a.perf1d||0, perfYtd: a.perfYtd||0, perfTotal: a.perfTotal||0,
-      geo:    geoMap[geoRaw] || 'world',
-      sector: secRaw.includes('tech')?'tech':secRaw.includes('nerg')?'energy':secRaw.includes('inanc')?'finance':secRaw.includes('rypto')?'crypto':'mixed',
-      currency: a.devise||'EUR', fees:0,
-    });
-  });
-  saveLocalData(); initOverview();
-  showToast(`${_pendingFileAssets.length} actifs import\u00E9s \u2713`, '#22c55e');
-  const status = document.getElementById('fileImportStatus');
-  if(status){ status.textContent='Import\u00E9'; status.className='badge badge-up'; }
-  const btn = document.getElementById('fileImportBtn');
-  if(btn) btn.style.display='none';
-  _pendingFileAssets = [];
-  if(typeof renderPortfolio==='function') renderPortfolio();
-}
-
-// ─── MODALS ──────────────────────────────────────────────────────────────
-
-function openModal(id)  { const el=document.getElementById('modal-'+id); if(el) el.classList.add('open'); }
-function closeModal(id) { const el=document.getElementById('modal-'+id); if(el) el.classList.remove('open'); }
-
-// ─── ANALYSE DIVERSIFICATION (appelée depuis dashboard.html) ─────────────
-// La fonction computeDiversityScore() est définie dans dashboard.html
-// On s'assure qu'elle existe, sinon on crée un stub
-if (typeof computeDiversityScore === 'undefined') {
-  window.computeDiversityScore = function() {};
-}
+  <script src="app.js?v=5"></script>
+</body>
+</html>
