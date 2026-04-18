@@ -162,8 +162,21 @@ function saveLocalData() {
 
 let chartHistoInstance = null, showSavingsInTotal = true;
 
+// Helpers : valeur et coût d'un actif (utilise valTotale du Sheet si disponible)
+function assetValue(a) {
+  if (a.valTotale && a.valTotale > 0) return a.valTotale;
+  return (a.qty || 0) * (a.currentPrice || a.buyPrice || 0);
+}
+function assetCost(a) {
+  if (a.investi && a.investi > 0) return a.investi;
+  return (a.qty || 0) * (a.buyPrice || 0);
+}
+function getCssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
 function initOverview() {
-  const totalAssets = assets.reduce((s, a) => s + (a.qty || 1) * (a.currentPrice || a.buyPrice || 0), 0);
+  const totalAssets = assets.reduce((s, a) => s + assetValue(a), 0);
   const totalSav    = savings.reduce((s, sv) => s + (sv.balance || 0), 0);
   const total       = showSavingsInTotal ? totalAssets + totalSav : totalAssets;
   safeSet('kpi-total', fmt.format(total));
@@ -179,14 +192,14 @@ function renderCategoryCards(totalAssets, totalSav, total) {
   const el = document.getElementById('categoryCards');
   if (!el) return;
   const cats = [
-    { id:'stock',   label:'Actions / ETF',   icon:'📈', color:'#3b82f6' },
-    { id:'crypto',  label:'Crypto',           icon:'₿',  color:'#f59e0b' },
-    { id:'esop',    label:'ESOP / PER',       icon:'🏢', color:'#a78bfa' },
-    { id:'savings', label:'Épargne bancaire', icon:'🏦', color:'#22c55e' },
+    { id:'stock',   label:'Actions / ETF',   icon:'\uD83D\uDCC8', color:'#3b82f6' },
+    { id:'crypto',  label:'Crypto',           icon:'\u20BF',       color:'#f59e0b' },
+    { id:'esop',    label:'ESOP / PER',       icon:'\uD83C\uDFE2', color:'#a78bfa' },
+    { id:'savings', label:'\u00C9pargne bancaire', icon:'\uD83C\uDFE6', color:'#22c55e' },
   ];
   const rows = cats.map(cat => {
     const val = cat.id === 'savings' ? totalSav
-      : assets.filter(a => (a.type || 'stock') === cat.id).reduce((s, a) => s + (a.qty || 1) * (a.currentPrice || a.buyPrice || 0), 0);
+      : assets.filter(a => (a.type || 'stock') === cat.id).reduce((s, a) => s + assetValue(a), 0);
     if (val === 0) return '';
     const pct = total > 0 ? ((val / total) * 100).toFixed(1) : 0;
     return `<div class="cat-card" onclick="navigate('${cat.id === 'savings' ? 'savings' : 'portfolio'}')">
@@ -195,11 +208,11 @@ function renderCategoryCards(totalAssets, totalSav, total) {
       <div class="cat-right"><div class="cat-val">${fmt.format(val)}</div></div>
     </div>`;
   }).filter(Boolean);
-  el.innerHTML = rows.length ? rows.join('') : '<div class="empty-state"><div class="icon">📊</div><p>Ajoutez vos actifs via <b>Connexions</b></p></div>';
+  el.innerHTML = rows.length ? rows.join('') : '<div class="empty-state"><div class="icon">\uD83D\uDCCA</div><p>Ajoutez vos actifs via <b>Connexions</b></p></div>';
 }
 
 function renderPnlStats(totalAssets) {
-  const invested = assets.reduce((s, a) => s + (a.qty || 1) * (a.buyPrice || 0), 0);
+  const invested = assets.reduce((s, a) => s + assetCost(a), 0);
   const pnl = totalAssets - invested;
   const pnlPct = invested > 0 ? ((pnl / invested) * 100).toFixed(2) : 0;
   const color = pnl >= 0 ? '#22c55e' : '#ef4444';
@@ -217,10 +230,10 @@ function renderPnlStats(totalAssets) {
 
 function renderBestWorst() {
   if (!assets.length) return;
-  const withPerf = assets.map(a => ({
-    name: a.name || '?',
-    perf: a.buyPrice > 0 ? ((a.currentPrice - a.buyPrice) / a.buyPrice * 100) : 0
-  })).sort((a, b) => b.perf - a.perf);
+  const withPerf = assets.map(a => {
+    const val = assetValue(a), cost = assetCost(a);
+    return { name: a.name || '?', perf: cost > 0 ? (val - cost) / cost * 100 : (a.perfTotal ? a.perfTotal * 100 : 0) };
+  }).sort((a, b) => b.perf - a.perf);
   if (withPerf.length) {
     safeSet('statBestName',  withPerf[0].name);
     safeSet('statBestPct',   '+' + withPerf[0].perf.toFixed(1) + '%');
@@ -267,7 +280,7 @@ function renderHistoChart(total) {
     type: 'line',
     data: { labels, datasets: [{ data, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.08)', fill: true, tension: 0.4, pointRadius: 0, borderWidth: 2 }] },
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
-      scales: { y: { display: false }, x: { grid: { display: false }, ticks: { color: '#52525b', font: { size: 10 }, maxTicksLimit: 6 } } } }
+      scales: { y: { display: false }, x: { grid: { display: false }, ticks: { color: getComputedStyle(document.documentElement).getPropertyValue('--muted2')||'#52525b', font: { size: 10 }, maxTicksLimit: 6 } } } }
   });
 }
 
@@ -356,7 +369,7 @@ function renderSavings() {
     chartSavingsInstance = new Chart(ctx.getContext('2d'), {
       type:'doughnut',
       data:{ labels:savings.map(s=>s.name), datasets:[{data:savings.map(s=>s.balance), backgroundColor:['#3b82f6','#22c55e','#f59e0b','#a78bfa','#ef4444'], borderWidth:0}] },
-      options:{cutout:'65%',plugins:{legend:{position:'right',labels:{color:'#fff',font:{size:11}}}}}
+      options:{cutout:'65%',plugins:{legend:{position:'right',labels:{color:getComputedStyle(document.documentElement).getPropertyValue('--text')||'#fff',font:{size:11}}}}}
     });
   }
 }
@@ -477,9 +490,9 @@ function updateProjection() {
       {label:'Total investi',  data:dataInv,borderColor:'#52525b',borderDash:[5,5],fill:false,pointRadius:0}
     ]},
     options:{responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{labels:{color:'#94a3b8',font:{size:11}}}},
-      scales:{y:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#52525b',callback:v=>fmt.format(v)}},
-              x:{grid:{display:false},ticks:{color:'#52525b',maxTicksLimit:8}}}}
+      plugins:{legend:{labels:{color:getComputedStyle(document.documentElement).getPropertyValue('--muted2')||'#94a3b8',font:{size:11}}}},
+      scales:{y:{grid:{color:getComputedStyle(document.documentElement).getPropertyValue('--border')||'rgba(255,255,255,0.04)'},ticks:{color:getComputedStyle(document.documentElement).getPropertyValue('--muted2')||'#52525b',callback:v=>fmt.format(v)}},
+              x:{grid:{display:false},ticks:{color:getComputedStyle(document.documentElement).getPropertyValue('--muted2')||'#52525b',maxTicksLimit:8}}}}
   });
 }
 
@@ -520,125 +533,130 @@ function addAsset() {
 // ─── CONNEXIONS ──────────────────────────────────────────────────────────
 
 async function connectSheets() {
-  const apiKey=document.getElementById('sheetsApiKey')?.value?.trim();
-  const url   =document.getElementById('sheetsUrl')?.value?.trim();
-  if(!apiKey||!url) return showToast('Clé API et URL requis','#ef4444');
-  const match=url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-  if(!match) return showToast('URL invalide','#ef4444');
-  const sheetId=match[1];
-  const btn=document.getElementById('importSheetsBtn');
+  const apiKey = document.getElementById('sheetsApiKey')?.value?.trim();
+  const url    = document.getElementById('sheetsUrl')?.value?.trim();
+  if (!apiKey || !url) return showToast('Clé API et URL requis', '#ef4444');
+  const match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if (!match) return showToast('URL invalide', '#ef4444');
+  const sheetId = match[1];
+  const btn = document.getElementById('importSheetsBtn');
 
-  // Onglets à importer avec leur type d'actif associé
-  const tabs = [
-    { name: 'CTO',    type: 'stock',  source: 'sheets-cto'    },
-    { name: 'Crypto', type: 'crypto', source: 'sheets-crypto'  },
-    { name: 'AIRBUS', type: 'esop',   source: 'sheets-airbus', isAirbus: true },
-  ];
+  const p = s => parseFloat((s||'0').toString().replace(',','.')) || 0;
+  const t = s => (s||'').toString().trim();
+
+  async function fetchTab(name) {
+    try {
+      const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(name)}?key=${apiKey}`);
+      const data = await res.json();
+      if (data.error) { console.warn(`Onglet "${name}" ignoré:`, data.error.message); return null; }
+      return data.values || [];
+    } catch(e) { return null; }
+  }
 
   try {
-    if(btn) btn.textContent='⏳ Import en cours...';
-    let imported=0;
+    if (btn) btn.textContent = '⏳ Import en cours...';
+    assets = assets.filter(a => !a.source?.startsWith('sheets-'));
+    let imported = 0;
 
-    for (const tab of tabs) {
-      const encodedTab = encodeURIComponent(tab.name);
-      const res = await fetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodedTab}?key=${apiKey}`
-      );
-      const data = await res.json();
-      if (data.error) {
-        console.warn(`Onglet "${tab.name}" ignoré :`, data.error.message);
-        continue;
-      }
-
-      if (tab.isAirbus) {
-        // Onglet AIRBUS : ESOP 2025 et 2026 séparés, + intéressement additionné
-        // Cherche lignes contenant ticker, qty, prix achat, prix actuel, dividende
-        let percolInter = 0; // intéressement/participation annuel à accumuler
-        (data.values||[]).slice(1).forEach(row => {
-          if (!row[0]) return;
-          const rawName = (row[0]||'').toString().trim();
-          // Les lignes d'intéressement/participation sont additionnées
-          const lowerName = rawName.toLowerCase();
-          if (lowerName.includes('interessement') || lowerName.includes('intéressement') || lowerName.includes('participation') || lowerName.includes('percol') || lowerName.includes('per ')) {
-            percolInter += parseFloat(row[2]||row[1]||0) || 0;
-            return;
-          }
-          const ticker = (row[1]||row[0]||'').toString().trim() || rawName;
-          const displayName = rawName !== ticker ? `${rawName} (${ticker})` : rawName;
-          const asset = {
-            name:         displayName,
-            ticker:       ticker,
-            source:       tab.source,
-            type:         tab.type,
-            qty:          parseFloat(row[2]) || 1,
-            buyPrice:     parseFloat(row[3]) || 0,
-            currentPrice: parseFloat(row[4]) || parseFloat(row[3]) || 0,
-            dividend:     parseFloat(row[5]) || 0,
-            geo:          'eu',
-            sector:       'industry',
-            currency:     'EUR',
-            fees:         parseFloat(row[6]) || 0,
-          };
-          const idx = assets.findIndex(a => a.name === asset.name && a.source === tab.source);
-          if (idx >= 0) assets[idx] = asset; else assets.push(asset);
-          imported++;
-        });
-        // Ajoute l'intéressement/participation dans salaryData si présent
-        if (percolInter > 0) {
-          if (!salaryData.inter) salaryData.inter = 0;
-          salaryData.inter = percolInter;
-          saveLocalData();
-        }
-      } else {
-        (data.values||[]).slice(1).forEach(row => {
-          if (!row[0]) return;
-          const rawName = (row[0]||'').toString().trim();
-          const ticker = (row[1]||rawName).toString().trim();
-          const displayName = (rawName && ticker && rawName !== ticker) ? `${rawName} (${ticker})` : rawName;
-          const asset = {
-            name:         displayName,
-            ticker:       ticker,
-            source:       tab.source,
-            type:         tab.type,
-            qty:          parseFloat(row[2]) || 1,
-            buyPrice:     parseFloat(row[3]) || 0,
-            currentPrice: parseFloat(row[4]) || parseFloat(row[3]) || 0,
-            dividend:     parseFloat(row[5]) || 0,
-            geo:          tab.type === 'crypto' ? 'other' : (row[6]||'world'),
-            sector:       tab.type === 'crypto' ? 'crypto' : (row[7]||'mixed'),
-            currency:     row[8]||'EUR',
-            fees:         parseFloat(row[9]) || 0,
-          };
-          const idx = assets.findIndex(a => a.name === asset.name && a.source === tab.source);
-          if (idx >= 0) assets[idx] = asset; else assets.push(asset);
-          imported++;
-        });
-      }
+    // CTO — A=Ticker B=Nom C=Qté D=PRU E=Prix F=Investi G=ValTotale
+    //        H=1J I=Hebdo J=1Mois L=YTD M=Perf% N=Catégorie O=Secteur P=ZoneGéo X=Devise
+    const ctoRows = await fetchTab('CTO');
+    if (ctoRows) {
+      ctoRows.slice(1).forEach(row => {
+        const ticker = t(row[0]);
+        if (!ticker || ticker.toUpperCase() === 'TOTAL') return;
+        const nom = t(row[1]) || ticker;
+        const qty = p(row[2]); const pru = p(row[3]); const prix = p(row[4]);
+        if (qty === 0 && prix === 0) return;
+        const geoRaw = t(row[15]).toLowerCase();
+        const geoMap = {'usa':'us','etats-unis':'us','états-unis':'us','europe':'eu','france':'fr','monde':'world','emergent':'em','emergents':'em'};
+        const geo = geoMap[geoRaw] || 'world';
+        const secRaw = t(row[14]).toLowerCase();
+        const sector = secRaw.includes('tech')?'tech':secRaw.includes('nerg')?'energy':secRaw.includes('inanc')?'finance':secRaw.includes('sant')||secRaw.includes('alth')?'health':secRaw.includes('onautique')||secRaw.includes('ndustri')?'industry':secRaw.includes('rypto')?'crypto':'mixed';
+        assets.push({ name:`${nom} (${ticker})`, ticker, source:'sheets-cto', type:'stock',
+          qty, buyPrice:pru, currentPrice:prix, investi:p(row[5]), valTotale:p(row[6]),
+          perf1d:p(row[7]), perfW:p(row[8]), perfM:p(row[9]), perfYtd:p(row[11]), perfTotal:p(row[12]),
+          geo, sector, currency:t(row[23])||'EUR', fees:0 });
+        imported++;
+      });
     }
 
-    // Onglet Dividendes (optionnel)
-    try {
-      const divRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/Dividendes?key=${apiKey}`);
-      const divData = await divRes.json();
-      if (!divData.error) {
-        let divs = JSON.parse(localStorage.getItem('patrimonia_dividends')||'[]');
-        (divData.values||[]).slice(1).forEach(row => {
-          if (!row[0]) return;
-          divs.push({ date: row[0], ticker: row[1]||'', amount: parseFloat(row[2])||0, source: 'sheets' });
-        });
-        localStorage.setItem('patrimonia_dividends', JSON.stringify(divs));
-      }
-    } catch(e) { /* onglet optionnel */ }
+    // AIRBUS — A=Année B=Enveloppe C=Nom D=Investi H=TotalQté I=PRUAchat K=Cours L=ValTotale M=Perf%
+    const airbusRows = await fetchTab('AIRBUS');
+    if (airbusRows) {
+      let interTotal = 0;
+      airbusRows.slice(1).forEach(row => {
+        const enveloppe = t(row[1]).toUpperCase();
+        const nom = t(row[2]);
+        if (!nom || nom.toUpperCase() === 'TOTAL' || !enveloppe) return;
+        const investi = p(row[3]); const totalQty = p(row[7]);
+        const pruAchat = p(row[8]); const cours = p(row[10]);
+        const valTotale = p(row[11]); const perf = p(row[12]);
+        // Intéressement → salaryData uniquement
+        if (nom.toLowerCase().includes('int\u00e9ressement') || nom.toLowerCase() === 'int\u00e9ressement') {
+          if (investi > 0) interTotal += investi;
+          return;
+        }
+        if (valTotale === 0 && totalQty === 0 && investi === 0) return;
+        const ticker = (enveloppe === 'PEG') ? 'EPA:AIR' : (nom.toLowerCase().includes('airbus') ? 'EPA:AIR' : 'PME');
+        const serial = p(row[0]);
+        const annee = serial > 40000 ? new Date(Math.round((serial-25569)*86400*1000)).getFullYear() : '';
+        assets.push({ name:`${nom} ${enveloppe} ${annee}`, ticker, source:'sheets-airbus', type:'esop',
+          qty:totalQty, buyPrice:pruAchat, currentPrice:cours, investi, valTotale, perfTotal:perf,
+          enveloppe, geo:'eu', sector:'industry', currency:'EUR', fees:0 });
+        imported++;
+      });
+      if (interTotal > 0) salaryData.inter = interTotal;
+    }
+
+    // CRYPTO — A=Ticker B=Nom C=Qté D=PRU E=Prix€ F=Investi G=ValTotale H=Perf%
+    const cryptoRows = await fetchTab('Crypto');
+    if (cryptoRows) {
+      cryptoRows.slice(1).forEach(row => {
+        const ticker = t(row[0]);
+        if (!ticker || ticker.toUpperCase() === 'TOTAL') return;
+        const nom = t(row[1]) || ticker;
+        const qty = p(row[2]); const prix = p(row[4]);
+        if (qty === 0 && prix === 0) return;
+        assets.push({ name:`${nom} (${ticker})`, ticker, source:'sheets-crypto', type:'crypto',
+          qty, buyPrice:p(row[3]), currentPrice:prix, investi:p(row[5]), valTotale:p(row[6]),
+          perfTotal:p(row[7]), geo:'other', sector:'crypto', currency:'EUR', fees:0 });
+        imported++;
+      });
+    }
+
+    // DIVIDENDES — "Suivi CTO 2026" col I(8)=Date J(9)=Société K(10)=Montant L(11)=Div/action
+    const suiviRows = await fetchTab('Suivi CTO 2026');
+    if (suiviRows) {
+      const divs = [];
+      suiviRows.slice(1).forEach(row => {
+        const societe = t(row[9]); const montant = p(row[10]);
+        if (!societe || societe.toUpperCase() === 'TOTAL' || montant <= 0) return;
+        const serial = parseFloat(row[8]);
+        let dateStr = '';
+        if (!isNaN(serial) && serial > 40000) {
+          dateStr = new Date(Math.round((serial-25569)*86400*1000)).toLocaleDateString('fr-FR');
+        } else { dateStr = t(row[8]); }
+        divs.push({ date:dateStr, ticker:societe, amount:montant, divPerShare:p(row[11]), source:'sheets' });
+      });
+      if (divs.length) localStorage.setItem('patrimonia_dividends', JSON.stringify(divs));
+    }
 
     saveLocalData(); initOverview();
-    document.getElementById('sheetsStatus').textContent='Connecté';
-    document.getElementById('sheetsStatus').className='badge badge-up';
-    document.getElementById('dashboardDetected').style.display='block';
-    showToast(imported+' actifs importés ✓','#22c55e');
+    const statusEl = document.getElementById('sheetsStatus');
+    if (statusEl) { statusEl.textContent='Connecté'; statusEl.className='badge badge-up'; }
+    const det = document.getElementById('dashboardDetected');
+    if (det) det.style.display='block';
+    showToast(imported+' actifs import\u00E9s \u2713', '#22c55e');
     autoFillFiscalFromSalary();
-  } catch(err){ showToast('Erreur : '+err.message,'#ef4444'); }
-  finally{ if(btn) btn.textContent='⬇ Importer mon Google Sheet'; }
+
+  } catch(err) {
+    showToast('Erreur : '+err.message, '#ef4444'); console.error(err);
+  } finally {
+    if (btn) btn.textContent='\u2B07 Importer mon Google Sheet';
+  }
 }
+
 
 async function connectBinance() {
   const manual=document.getElementById('binanceManual')?.value?.trim();
