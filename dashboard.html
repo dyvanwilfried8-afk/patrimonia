@@ -22,6 +22,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 
     :root {
       --bg:       #0b0b0f;
@@ -105,6 +106,7 @@
     /* ── SIDEBAR ── */
     .sidebar {
       width: var(--sidebar);
+      overscroll-behavior: contain;
       background: var(--surface);
       border-right: 1px solid var(--border);
       display: flex;
@@ -153,6 +155,8 @@
 
     .nav-item {
       display: flex;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
       align-items: center;
       gap: 10px;
       padding: 9px 12px;
@@ -611,23 +615,92 @@
     .mobile-nav-item.active {  }
     .mobile-nav-item .mn-icon { font-size: 20px; }
 
+    /* ══════════════════════════════════════════
+       RESPONSIVE — breakpoints adaptatifs
+       1280px+ : desktop large
+       1024px  : desktop normal
+        900px  : tablet landscape / small laptop
+        768px  : tablet portrait
+        480px  : mobile large
+        360px  : mobile small
+    ══════════════════════════════════════════ */
+
+    /* Tablet landscape (900-1024px) : sidebar rétractée, 2 colonnes max */
+    @media (max-width: 1024px) {
+      :root { --sidebar: 200px; }
+      .content { padding: 22px 24px; }
+      .kpi-grid { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+      .grid-3 { grid-template-columns: 1fr 1fr; }
+    }
+
+    /* Tablet portrait + mobile large (≤ 900px) : sidebar en drawer */
     @media (max-width: 900px) {
+      :root { --sidebar: 260px; }
       .mobile-nav { display: flex; }
-      .main { padding-bottom: 70px; }
-      .sidebar { transform: translateX(-100%); }
-      .sidebar.open { transform: translateX(0); }
+      .main { padding-bottom: 72px; margin-left: 0 !important; width: 100% !important; max-width: 100% !important; }
+      .sidebar { transform: translateX(-100%); box-shadow: none; }
+      .sidebar.open { transform: translateX(0); box-shadow: 4px 0 32px rgba(0,0,0,0.4); }
       .sidebar-overlay.open { display: block !important; }
-      .main { margin-left: 0 !important; width: 100% !important; max-width: 100% !important; }
       .hamburger { display: flex !important; }
       .grid-2, .grid-3, .grid-13, .grid-31 { grid-template-columns: 1fr; }
       .kpi-grid { grid-template-columns: 1fr 1fr; }
-      .content { padding: 20px 16px; }
-      .topbar { padding: 16px 20px; }
+      .content { padding: 18px 16px; }
+      .topbar { padding: 14px 16px; }
       .form-grid { grid-template-columns: 1fr; }
+      .topbar-title { font-size: 17px; }
+      .panel { padding: 16px; }
+      .data-table th, .data-table td { padding: 8px 8px; font-size: 12px; }
+      .sort-btn { font-size: 10px; padding: 4px 8px; }
+      .chart-wrap { height: 180px; }
+      .chart-wrap-lg { height: 220px; }
     }
 
+    /* Mobile large (≤ 600px) */
+    @media (max-width: 600px) {
+      .kpi-grid { grid-template-columns: 1fr 1fr; }
+      .kpi-card { padding: 14px; }
+      .kpi-value { font-size: 20px; }
+      #kpi-total { font-size: 30px !important; }
+      .content { padding: 14px 12px; }
+      .topbar { padding: 12px 14px; }
+      .topbar-right { gap: 6px; }
+      .refresh-btn { padding: 6px 10px; font-size: 11px; }
+      .btn.btn-accent { padding: 6px 12px; font-size: 11px; }
+      .cat-card { padding: 12px 14px; }
+      .panel-title { font-size: 13px; }
+      .fiscal-profiles { grid-template-columns: repeat(3, 1fr); }
+      /* Table portfolio : masquer colonnes secondaires */
+      .portfolio-col-jour,
+      .portfolio-col-hebdo,
+      .portfolio-col-mois { display: none; }
+    }
+
+    /* Mobile small (≤ 480px) */
     @media (max-width: 480px) {
       .kpi-grid { grid-template-columns: 1fr; }
+      .kpi-card { padding: 12px; }
+      #kpi-total { font-size: 26px !important; }
+      .topbar { padding: 10px 12px; }
+      .content { padding: 12px 10px; }
+      .modal { padding: 20px 16px; }
+      .section-title { font-size: 18px; }
+      .fiscal-profiles { grid-template-columns: repeat(2, 1fr); }
+      .region-grid { grid-template-columns: repeat(2, 1fr); }
+      /* Portfolio : garder seulement l'essentiel */
+      .portfolio-col-ytd { display: none; }
+    }
+
+    /* Very small (≤ 360px) */
+    @media (max-width: 360px) {
+      .content { padding: 10px 8px; }
+      .topbar-title { font-size: 15px; }
+      .brand-name { font-size: 15px; }
+    }
+
+    /* Large screens (≥ 1400px) : wider sidebar */
+    @media (min-width: 1400px) {
+      :root { --sidebar: 240px; }
+      .content { padding: 32px 40px; }
     }
 
     /* ── SPLASH SCREEN ── */
@@ -1138,8 +1211,17 @@
           <div style="overflow-x:auto;max-width:100%;width:100%">
             <table class="data-table" id="portfolioTable">
               <thead><tr>
-                <th>Actif</th><th>Source</th><th>Valeur</th><th>P&L (€)</th><th>P&L (%)</th>
-                <th>Jour</th><th>Hebdo</th><th>Mois</th><th>YTD</th><th>Total</th><th>Poids</th>
+                <th>Actif</th>
+                <th class="portfolio-col-source">Source</th>
+                <th>Valeur</th>
+                <th>P&amp;L (€)</th>
+                <th>P&amp;L (%)</th>
+                <th class="portfolio-col-jour">Jour</th>
+                <th class="portfolio-col-hebdo">Hebdo</th>
+                <th class="portfolio-col-mois">Mois</th>
+                <th class="portfolio-col-ytd">YTD</th>
+                <th>Total</th>
+                <th>Poids</th>
               </tr></thead>
               <tbody id="portfolioTbody"></tbody>
             </table>
@@ -1527,6 +1609,40 @@
           </div>
         </div>
 
+        <!-- Import CSV / Excel / XLSX -->
+        <div class="panel mt-16">
+          <div class="panel-header">
+            <div class="panel-title">📂 Import fichier (CSV / Excel / XLSX)</div>
+            <span id="fileImportStatus" class="badge badge-neutral">–</span>
+          </div>
+          <div style="background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.15);border-radius:10px;padding:12px;margin-bottom:14px;">
+            <div style="font-size:11px;color:var(--green);font-weight:700;margin-bottom:6px;">📋 Format attendu (colonnes requises)</div>
+            <div class="text-xs color-muted" style="line-height:1.8;">
+              <b>CSV / Excel :</b> Ticker · Nom · Quantité · PRU · Prix actuel<br>
+              <b>Colonnes optionnelles :</b> Investi · Valeur · 1J · Hebdo · YTD · Secteur · Géo · Devise<br>
+              <b>Exemple :</b> <code style="color:var(--accent);">EPA:AIR,Airbus,10,120,171.78,1200,1717.8</code>
+            </div>
+          </div>
+          <div class="field-group">
+            <label class="field-label">Glissez ou sélectionnez votre fichier</label>
+            <div id="fileDropZone" style="border:2px dashed var(--border2);border-radius:10px;padding:28px;text-align:center;cursor:pointer;transition:all 0.2s;"
+                 onclick="document.getElementById('fileImportInput').click()"
+                 ondragover="event.preventDefault();this.style.borderColor='var(--accent)'"
+                 ondragleave="this.style.borderColor='var(--border2)'"
+                 ondrop="handleFileDrop(event)">
+              <div style="font-size:28px;margin-bottom:8px;">📁</div>
+              <div style="font-size:13px;font-weight:500;color:var(--text);">Cliquez ou glissez un fichier ici</div>
+              <div style="font-size:11px;color:var(--muted2);margin-top:4px;">.csv · .xlsx · .xls · .json acceptés</div>
+            </div>
+            <input type="file" id="fileImportInput" style="display:none" accept=".csv,.xlsx,.xls,.json" onchange="handleFileImport(event)">
+          </div>
+          <div id="fileImportPreview" style="margin-top:12px;"></div>
+          <div style="margin-top:10px;display:flex;gap:8px;">
+            <button class="btn btn-ghost" style="flex:1;" onclick="document.getElementById('fileImportInput').click()">📂 Choisir un fichier</button>
+            <button class="btn btn-accent" style="flex:1;" id="fileImportBtn" onclick="confirmFileImport()" style="display:none;">✓ Importer les actifs</button>
+          </div>
+        </div>
+
         <!-- Manual assets -->
         <div class="panel mt-16">
           <div class="panel-header">
@@ -1541,12 +1657,13 @@
            PAGE: SETTINGS
       ══════════════════════════════════════ -->
       <section class="page-section" id="page-settings">
-        <div class="section-title">Paramètres</div>
-        <div class="section-sub">Configurez votre espace WealthView</div>
+        <div class="section-title">⚙️ Paramètres</div>
+        <div class="section-sub">Configurez votre espace Patrimonia</div>
 
         <div class="grid-2">
+          <!-- Affichage -->
           <div class="panel">
-            <div class="panel-header"><div class="panel-title">Devise & affichage</div></div>
+            <div class="panel-header"><div class="panel-title">🎨 Affichage</div></div>
             <div class="field-group">
               <label class="field-label">Devise principale</label>
               <select class="field-input" id="currency">
@@ -1560,16 +1677,44 @@
               <label class="field-label">Seuil de surexposition (%)</label>
               <input class="field-input" type="number" id="exposureThreshold" value="20" />
             </div>
-            <button class="btn btn-accent" onclick="saveSettings()">Sauvegarder</button>
-          </div>
-          <div class="panel">
-            <div class="panel-header"><div class="panel-title">Données</div></div>
             <div class="field-group">
-              <button class="btn btn-ghost w-full mb-16" onclick="exportData()">📥 Exporter mes données (JSON)</button>
-              <button class="btn btn-ghost w-full mb-16" onclick="importData()">📤 Importer des données</button>
-              <input type="file" id="importFile" style="display:none" accept=".json" onchange="handleImport(event)">
-              <button class="btn btn-danger w-full" onclick="clearData()">🗑️ Réinitialiser les données</button>
+              <label class="field-label">Thème</label>
+              <div style="display:flex;gap:8px;">
+                <button class="btn btn-ghost" style="flex:1;" onclick="applyTheme('dark')">🌙 Sombre</button>
+                <button class="btn btn-ghost" style="flex:1;" onclick="applyTheme('light')">☀ Clair</button>
+              </div>
             </div>
+            <button class="btn btn-accent w-full" onclick="saveSettings()">Sauvegarder</button>
+          </div>
+
+          <!-- Import / Export données -->
+          <div class="panel">
+            <div class="panel-header"><div class="panel-title">💾 Données</div></div>
+            <div class="field-group" style="display:flex;flex-direction:column;gap:10px;">
+              <button class="btn btn-ghost w-full" onclick="exportData()">📥 Exporter mes données (JSON)</button>
+              <button class="btn btn-ghost w-full" onclick="importData()">📤 Importer des données (JSON)</button>
+              <input type="file" id="importFile" style="display:none" accept=".json,.xlsx,.xls,.csv" onchange="handleImport(event)">
+              <button class="btn btn-danger w-full" onclick="clearData()">🗑️ Réinitialiser les données locales</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Compte -->
+        <div class="panel" style="margin-top:16px;">
+          <div class="panel-header"><div class="panel-title">👤 Mon compte</div></div>
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:12px 0;border-bottom:1px solid var(--border);">
+            <div>
+              <div style="font-size:14px;font-weight:500;" id="settingsEmail">–</div>
+              <div style="font-size:12px;color:var(--muted2);">Compte connecté</div>
+            </div>
+            <button class="btn btn-ghost" onclick="logout()">🚪 Se déconnecter</button>
+          </div>
+          <div style="margin-top:20px;padding:16px;background:rgba(239,68,68,0.05);border:1px solid rgba(239,68,68,0.2);border-radius:10px;">
+            <div style="font-size:13px;font-weight:600;color:var(--danger);margin-bottom:6px;">⚠️ Zone dangereuse</div>
+            <div style="font-size:12px;color:var(--muted2);margin-bottom:12px;line-height:1.6;">
+              La suppression de votre compte est <b>irréversible</b>. Toutes vos données (actifs, budget, historique) seront définitivement effacées.
+            </div>
+            <button class="btn btn-danger" onclick="openModal('deleteAccount')" style="width:100%;">🗑️ Supprimer mon compte définitivement</button>
           </div>
         </div>
       </section>
@@ -2112,6 +2257,62 @@
       <div style="margin-top:20px; display:flex; gap:8px; justify-content:flex-end;">
         <button class="btn btn-ghost" onclick="closeModal('addExpense')">Annuler</button>
         <button class="btn btn-accent" onclick="addExpense()">Ajouter</button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ── MODAL: SUPPRIMER COMPTE ── -->
+  <div class="modal-overlay" id="modal-deleteAccount">
+    <div class="modal" style="max-width:440px;">
+      <div class="modal-header">
+        <div class="modal-title" style="color:var(--danger);">⚠️ Supprimer mon compte</div>
+        <button class="close-btn" onclick="closeModal('deleteAccount')">✕</button>
+      </div>
+      <div style="background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.2);border-radius:8px;padding:14px;margin-bottom:20px;">
+        <div style="font-size:13px;color:var(--text);line-height:1.7;">
+          Cette action est <strong>irréversible</strong>. Elle supprimera :<br>
+          • Votre compte et vos identifiants<br>
+          • Toutes vos données financières<br>
+          • Votre historique complet
+        </div>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Tapez <strong>SUPPRIMER</strong> pour confirmer</label>
+        <input class="field-input" id="deleteConfirmText" placeholder="SUPPRIMER" oninput="checkDeleteConfirm()">
+      </div>
+      <div style="margin-top:6px;font-size:12px;color:var(--muted2);">
+        Votre mot de passe vous sera demandé à l'étape suivante.
+      </div>
+      <div style="margin-top:20px;display:flex;gap:8px;justify-content:flex-end;">
+        <button class="btn btn-ghost" onclick="closeModal('deleteAccount')">Annuler</button>
+        <button class="btn btn-danger" id="deleteAccountBtn" onclick="deleteAccount()" disabled style="opacity:0.4;cursor:not-allowed;">
+          Supprimer définitivement
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── MODAL: CONFIRMER MOT DE PASSE (suppression) ── -->
+  <div class="modal-overlay" id="modal-deletePassword">
+    <div class="modal" style="max-width:400px;">
+      <div class="modal-header">
+        <div class="modal-title">🔒 Confirmer votre identité</div>
+        <button class="close-btn" onclick="closeModal('deletePassword')">✕</button>
+      </div>
+      <div style="font-size:13px;color:var(--muted2);margin-bottom:16px;">
+        Entrez votre mot de passe pour finaliser la suppression de votre compte.
+      </div>
+      <div class="field-group">
+        <label class="field-label">Mot de passe</label>
+        <input class="field-input" id="deletePassword" type="password" placeholder="Votre mot de passe">
+      </div>
+      <div id="deleteErrorMsg" style="font-size:12px;color:var(--danger);margin-top:6px;display:none;"></div>
+      <div style="margin-top:20px;display:flex;gap:8px;justify-content:flex-end;">
+        <button class="btn btn-ghost" onclick="closeModal('deletePassword')">Annuler</button>
+        <button class="btn btn-danger" id="deletePasswordBtn" onclick="confirmDeleteAccount()">
+          Supprimer mon compte
+        </button>
       </div>
     </div>
   </div>
