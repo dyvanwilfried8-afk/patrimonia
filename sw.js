@@ -1,5 +1,5 @@
 // ⚠️ Changer la version force le navigateur à vider l'ancien cache
-const CACHE = 'patrimonia-v7';
+const CACHE = 'patrimonia-v6';
 
 // Fichiers à mettre en cache au premier chargement
 const PRECACHE = [
@@ -7,7 +7,6 @@ const PRECACHE = [
   './index.html',
   './dashboard.html',
   './app.js',
-  './app.js?v=5',
 ];
 
 self.addEventListener('install', e => {
