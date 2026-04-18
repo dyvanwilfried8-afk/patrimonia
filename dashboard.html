@@ -194,7 +194,7 @@
       background: linear-gradient(135deg, var(--accent), var(--accent2));
       border-radius: 50%;
       display: flex; align-items: center; justify-content: center;
-      font-family: 'Inter', sans-serif;
+      font-family: 'Aptos', 'Inter', sans-serif;
       font-weight: 600;
       font-size: 13px;
       color: #060810;
@@ -262,7 +262,7 @@
       border-radius: 8px;
       font-size: 12px;
       cursor: pointer;
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-weight: 400;
+      font-family: 'Aptos', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-weight: 400;
       transition: all 0.2s;
     }
 
@@ -310,7 +310,7 @@
     }
 
     .kpi-value {
-      font-family: 'Inter', sans-serif;
+      font-family: 'Aptos', 'Inter', sans-serif;
       font-size: 24px;
       font-weight: 600;
       letter-spacing: -0.5px;
@@ -359,7 +359,7 @@
     }
 
     .panel-title {
-      font-family: 'Inter', sans-serif;
+      font-family: 'Aptos', 'Inter', sans-serif;
       font-size: 14px;
       font-weight: 600;
     }
@@ -370,7 +370,7 @@
       cursor: pointer;
       border: none;
       background: none;
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-weight: 400;
+      font-family: 'Aptos', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-weight: 400;
     }
 
     /* ── CHART CONTAINERS ── */
@@ -432,7 +432,7 @@
       border-radius: 8px;
       padding: 9px 12px;
       color: var(--text);
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-weight: 400;
+      font-family: 'Aptos', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-weight: 400;
       font-size: 13px;
       outline: none;
       transition: border-color 0.2s;
@@ -445,7 +445,7 @@
       padding: 9px 18px;
       border-radius: 8px;
       border: none;
-      font-family: 'Inter', sans-serif;
+      font-family: 'Aptos', 'Inter', sans-serif;
       font-size: 13px;
       font-weight: 600;
       cursor: pointer;
@@ -478,7 +478,7 @@
     }
 
     .rate-circle .rate-val {
-      font-family: 'Inter', sans-serif;
+      font-family: 'Aptos', 'Inter', sans-serif;
       font-size: 24px;
       font-weight: 600;
       
@@ -540,7 +540,7 @@
       margin-bottom: 20px;
     }
 
-    .modal-title { font-family: 'Inter', sans-serif; font-size: 17px; font-weight: 600; }
+    .modal-title { font-family: 'Aptos', 'Inter', sans-serif; font-size: 17px; font-weight: 600; }
 
     .close-btn {
       background: var(--surface2);
@@ -652,7 +652,7 @@
       background: var(--surface2);
       color: var(--muted);
       font-size: 11px;
-      font-family: 'Inter', sans-serif;
+      font-family: 'Aptos', 'Inter', sans-serif;
       font-weight: 400;
       cursor: pointer;
       transition: all 0.15s;
@@ -678,7 +678,7 @@
       color: var(--muted);
       font-size: 12px;
       font-weight: 400;
-      font-family: 'Inter', sans-serif;
+      font-family: 'Aptos', 'Inter', sans-serif;
       cursor: pointer;
       transition: all 0.2s;
       letter-spacing: 0.3px;
@@ -768,7 +768,7 @@
 
     /* Section title */
     .section-title {
-      font-family: 'Inter', sans-serif;
+      font-family: 'Aptos', 'Inter', sans-serif;
       font-size: 20px;
       font-weight: 600;
       margin-bottom: 6px;
@@ -1075,7 +1075,7 @@
           </div>
 
           <div style="display:flex;align-items:flex-end;gap:14px;margin-bottom:16px;flex-wrap:wrap;">
-            <div id="assetChartVal" style="font-family:'Inter',sans-serif;font-size:32px;font-weight:300;">–</div>
+            <div id="assetChartVal" style="font-family:'Aptos','Inter',sans-serif;font-size:32px;font-weight:300;">–</div>
             <div id="assetChartDelta" style="padding-bottom:4px;font-size:13px;">–</div>
           </div>
 
@@ -2208,7 +2208,7 @@
       const mkD=(id,labels,data)=>{
         if(window._anaCharts[id]) window._anaCharts[id].destroy();
         const ctx=document.getElementById(id)?.getContext('2d'); if(!ctx) return;
-        window._anaCharts[id]=new Chart(ctx,{type:'doughnut',data:{labels,datasets:[{data,backgroundColor:COLORS,borderColor:'#111116',borderWidth:2}]},options:{responsive:true,maintainAspectRatio:false,cutout:'65%',plugins:{legend:{position:'bottom',labels:{color:'#71717a',font:{size:10},boxWidth:10,padding:8}}}}});
+        window._anaCharts[id]=new Chart(ctx,{type:'doughnut',data:{labels,datasets:[{data,backgroundColor:COLORS,borderColor:getComputedStyle(document.documentElement).getPropertyValue('--surface')||'#111116',borderWidth:2}]},options:{responsive:true,maintainAspectRatio:false,cutout:'65%',plugins:{legend:{position:'bottom',labels:{color:getComputedStyle(document.documentElement).getPropertyValue('--muted2')||'#71717a',font:{size:10},boxWidth:10,padding:8}}}}});
       };
       const typeMap={},typeNames={stock:'Actions/ETF',crypto:'Crypto',savings:'Epargne',esop:'ESOP/PER'};
       assets.forEach(a=>{const t=a.type||'stock';typeMap[t]=(typeMap[t]||0)+(a.qty||1)*(a.currentPrice||0);});
