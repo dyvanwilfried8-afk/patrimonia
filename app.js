@@ -80,7 +80,7 @@ function navigate(pageId) {
   if (pageId === 'fees')       renderFees();
   if (pageId === 'savings')    renderSavings();
   if (pageId === 'salary')     renderSalary();
-  if (pageId === 'portfolio')  renderPortfolio();
+  if (pageId === 'portfolio')  { renderPortfolio(); renderAssetChart(); }
   if (pageId === 'fiscalite')  { autoFillFiscalFromSalary(); if(typeof calculateTax==='function') calculateTax(); }
   if (pageId === 'loan')       updateLoanCalc();
 }
@@ -235,7 +235,8 @@ function renderBestWorst() {
     // Use sheet's perfTotal if available (already correct), else calculate
     let perf;
     if (a.perfTotal && a.perfTotal !== 0) {
-      perf = a.perfTotal * 100; // perfTotal is a ratio like 0.413
+      // Normalize: ratio (0.476) or already % (47.6)
+      perf = Math.abs(a.perfTotal) <= 2 ? a.perfTotal * 100 : a.perfTotal;
     } else {
       const val = assetValue(a), cost = assetCost(a);
       perf = cost > 0 ? (val - cost) / cost * 100 : 0;
@@ -334,8 +335,11 @@ function renderPortfolio() {
   const typeLabels = { stock:'ETF', crypto:'Crypto', savings:'\u00C9pargne', esop:'ESOP' };
 
   const fmtPct = (v) => {
-    if (v === undefined || v === null || v === 0 || isNaN(v)) return '<span class="perf-zero">\u2013</span>';
-    const pct = typeof v === 'number' && Math.abs(v) <= 1 ? v * 100 : v;
+    if (v === undefined || v === null || isNaN(v)) return '<span class="perf-zero">\u2013</span>';
+    // Normalize: if |v| <= 2, it's a ratio (0.476) → multiply by 100
+    //            if |v| > 2, it's already a % value (47.6) → use as-is
+    const pct = Math.abs(v) <= 2 ? v * 100 : v;
+    if (Math.abs(pct) < 0.001) return '<span class="perf-zero">\u2013</span>';
     const cls = pct >= 0 ? 'perf-pos' : 'perf-neg';
     return `<span class="${cls}">${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%</span>`;
   };
@@ -344,11 +348,12 @@ function renderPortfolio() {
     const val   = assetValue(a);
     const cost  = assetCost(a);
     const pnl   = val - cost;
-    // Use sheet perfTotal (ratio) if available, otherwise calculate
+    // perfTotal from sheet can be ratio (0.476) or % string stripped (47.6)
+    // fmtPct handles both via the <=2 threshold normalization
     const pnlPct = a.perfTotal && a.perfTotal !== 0
-      ? a.perfTotal * 100
+      ? (Math.abs(a.perfTotal) <= 2 ? a.perfTotal * 100 : a.perfTotal)
       : cost > 0 ? (pnl / cost) * 100 : 0;
-    const pnlP   = pnlPct !== 0 ? pnlPct.toFixed(1) : '\u2013';
+    const pnlP   = Math.abs(pnlPct) > 0.01 ? pnlPct.toFixed(1) : '\u2013';
     const poids  = totalVal > 0 ? ((val / totalVal) * 100).toFixed(1) : '\u2013';
     const pc     = pnl >= 0 ? 'perf-pos' : 'perf-neg';
     const pcT    = pnlPct >= 0 ? 'perf-pos' : 'perf-neg';
@@ -371,11 +376,145 @@ function renderPortfolio() {
   }).join('');
 }
 
-function setAssetPeriod(p, btn) {
+let chartAssetInstance = null;
+let currentAssetPeriod = 'YTD';
+
+function setAssetPeriod(period, btn) {
+  currentAssetPeriod = period;
   document.querySelectorAll('#page-portfolio .period-btn').forEach(b => b.classList.remove('active', 'active-default'));
-  btn.classList.add('active');
+  if (btn) btn.classList.add('active');
+  renderAssetChart();
 }
-function renderAssetChart() {}
+
+function renderAssetChart() {
+  if (!assets.length) return;
+
+  const ctx = document.getElementById('chartAsset');
+  if (!ctx) return;
+  if (chartAssetInstance) { chartAssetInstance.destroy(); chartAssetInstance = null; }
+
+  const selectEl  = document.getElementById('assetChartSelect');
+  const valEl     = document.getElementById('assetChartVal');
+  const deltaEl   = document.getElementById('assetChartDelta');
+  const sparkEl   = document.getElementById('assetSparklines');
+  const period    = currentAssetPeriod;
+
+  // Populate select if not done yet
+  if (selectEl && selectEl.options.length <= 1) {
+    assets.forEach((a, i) => {
+      const opt = document.createElement('option');
+      opt.value = i; opt.textContent = a.name || a.ticker || 'Actif ' + i;
+      selectEl.appendChild(opt);
+    });
+  }
+
+  const selectedIdx = selectEl ? parseInt(selectEl.value) : NaN;
+  const isGlobal    = isNaN(selectedIdx) || selectEl?.value === '__global__';
+
+  // Total portfolio or single asset
+  const totalVal = assets.reduce((s, a) => s + assetValue(a), 0);
+  const totalCost = assets.reduce((s, a) => s + assetCost(a), 0);
+
+  // Pick perf for the chosen period
+  const getPerfRatio = (a) => {
+    // Returns a raw ratio or % value depending on what the sheet sent
+    const raw = period === '1J'  ? a.perf1d
+              : period === '7J'  ? a.perfW
+              : period === '1M'  ? a.perfM
+              : period === 'YTD' ? a.perfYtd
+              : a.perfTotal;
+    return raw || 0;
+  };
+
+  const normPct = (v) => {
+    if (!v || isNaN(v)) return 0;
+    return Math.abs(v) <= 2 ? v * 100 : v;
+  };
+
+  // Build bar chart data — top 10 by value
+  const displayAssets = isGlobal
+    ? [...assets].sort((a, b) => assetValue(b) - assetValue(a)).slice(0, 12)
+    : [assets[selectedIdx]].filter(Boolean);
+
+  const labels = displayAssets.map(a => (a.ticker || a.name || '?').replace(/\s*\(.*?\)\s*/, '').substring(0, 12));
+  const perfData = displayAssets.map(a => parseFloat(normPct(getPerfRatio(a)).toFixed(1)));
+  const bgColors = perfData.map(v => v >= 0 ? 'rgba(34,197,94,0.75)' : 'rgba(239,68,68,0.75)');
+  const mutedCol = getCssVar('--muted2') || '#71717a';
+  const textCol  = getCssVar('--text')   || '#f0f2f5';
+  const gridCol  = getCssVar('--border') || 'rgba(255,255,255,0.06)';
+
+  // Display total value and global perf
+  if (isGlobal) {
+    const globalPnl  = totalVal - totalCost;
+    const globalPct  = totalCost > 0 ? (globalPnl / totalCost * 100).toFixed(1) : '0';
+    if (valEl)   valEl.textContent   = fmt.format(totalVal);
+    if (deltaEl) {
+      const sign = globalPnl >= 0 ? '+' : '';
+      deltaEl.innerHTML = `<span style="color:${globalPnl >= 0 ? 'var(--green)' : 'var(--danger)'};">${sign}${fmt.format(globalPnl)} (${sign}${globalPct}%)</span>`;
+    }
+  } else {
+    const a = assets[selectedIdx];
+    if (a) {
+      const v = assetValue(a), c = assetCost(a), pnl = v - c;
+      const pct = normPct(getPerfRatio(a));
+      if (valEl) valEl.textContent = fmt.format(v);
+      if (deltaEl) {
+        const sign = pnl >= 0 ? '+' : '';
+        deltaEl.innerHTML = `<span style="color:${pnl >= 0 ? 'var(--green)' : 'var(--danger)'};">${sign}${fmt.format(pnl)} (${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%)</span>`;
+      }
+    }
+  }
+
+  // Render bar chart
+  chartAssetInstance = new Chart(ctx.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        data: perfData,
+        backgroundColor: bgColors,
+        borderRadius: 4,
+        borderSkipped: false,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => `${ctx.parsed.y >= 0 ? '+' : ''}${ctx.parsed.y.toFixed(1)}%`
+          }
+        }
+      },
+      scales: {
+        y: {
+          grid: { color: gridCol },
+          ticks: { color: mutedCol, callback: v => (v >= 0 ? '+' : '') + v + '%' }
+        },
+        x: { grid: { display: false }, ticks: { color: mutedCol, font: { size: 10 } } }
+      }
+    }
+  });
+
+  // Render sparklines (mini cards)
+  if (sparkEl && isGlobal) {
+    sparkEl.innerHTML = displayAssets.map(a => {
+      const v   = assetValue(a);
+      const pct = normPct(getPerfRatio(a));
+      const col = pct >= 0 ? 'var(--green)' : 'var(--danger)';
+      const sign = pct >= 0 ? '+' : '';
+      const shortName = (a.name || a.ticker || '?').replace(/\s*\(.*?\)\s*/, '').substring(0, 18);
+      return `<div style="background:var(--surface2);border-radius:8px;padding:10px 12px;border:1px solid var(--border);">
+        <div style="font-size:11px;color:var(--muted2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${shortName}</div>
+        <div style="font-size:16px;font-weight:600;margin-top:4px;">${fmt.format(v)}</div>
+        <div style="font-size:12px;font-weight:500;color:${col};">${sign}${pct.toFixed(1)}%</div>
+      </div>`;
+    }).join('');
+  } else if (sparkEl) {
+    sparkEl.innerHTML = '';
+  }
+}
 
 // ─── ÉPARGNE ─────────────────────────────────────────────────────────────
 
@@ -673,7 +812,6 @@ async function connectSheets() {
     //          G=PartsDividendes H=TotalQté I=PRUAchat J=PRURéel K=Cours L=ValTotale M=Perf%
     const airbusRows = await fetchTab('AIRBUS');
     if (airbusRows) {
-      let interTotal = 0;
       airbusRows.slice(1).forEach(row => {
         const enveloppe = t(row[1]).toUpperCase();  // PEG ou PERCOL
         const nom       = t(row[2]);
@@ -686,30 +824,32 @@ async function connectSheets() {
         const valTotale = p(row[11]);
         const perf      = p(row[12]);
 
-        // Intéressement → salaryData uniquement (pas dans le portefeuille)
+        // Intéressement PEG → c'est une action Airbus dans le portefeuille PEG
+        // On l'inclut comme actif EPA:AIR avec l'enveloppe PEG
         const nomLower = nom.toLowerCase()
           .normalize('NFD').replace(/[\u0300-\u036f]/g, ''); // remove accents
-        if (nomLower.includes('interessement') || nomLower.includes('participation')) {
-          if (investi > 0) interTotal += investi;
-          return; // ne pas créer d'actif
-        }
+        
+        const isInteressement = nomLower.includes('interessement') || nomLower.includes('participation');
 
         // Ignorer lignes 100% vides
         if (valTotale === 0 && totalQty === 0 && investi === 0) return;
 
-        const ticker   = (nom.toLowerCase().includes('airbus') || nom.toLowerCase().includes('esop') || enveloppe === 'PEG')
-                        ? 'EPA:AIR' : 'PERCOL-PME';
+        // Ticker : tout ce qui est PEG ou Airbus/ESOP → EPA:AIR
+        //          PERCOL PME/Diversifié → PME
+        const ticker = (enveloppe === 'PEG' || nom.toLowerCase().includes('airbus') || nom.toLowerCase().includes('esop'))
+                      ? 'EPA:AIR' : 'PERCOL-PME';
+
         const serial   = p(row[0]);
         const annee    = serial > 40000
           ? new Date(Math.round((serial - 25569) * 86400 * 1000)).getFullYear()
           : '';
 
         // Calcul valeur : préférer valTotale de la feuille (déjà en EUR)
-        // Sinon qty * cours
         const val = valTotale > 0 ? valTotale : (totalQty > 0 && cours > 0 ? totalQty * cours : 0);
         if (val === 0 && investi === 0) return;
 
-        const displayName = `${nom} ${enveloppe} ${annee}`.trim();
+        const shortLabel = isInteressement ? `Int\u00E9ressement ${enveloppe}` : nom;
+        const displayName = `${shortLabel} ${enveloppe} ${annee}`.trim();
 
         assets.push({
           name:         displayName,
@@ -731,7 +871,12 @@ async function connectSheets() {
         imported++;
       });
 
-      // L'intéressement va dans le salaire annuel
+      // L'intéressement va AUSSI dans le salaire annuel (montant investi = versement annuel)
+      const interRows = airbusRows.slice(1).filter(row => {
+        const n = (row[2]||'').toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+        return n.includes('interessement') || n.includes('participation');
+      });
+      const interTotal = interRows.reduce((s, row) => s + p(row[3]), 0);
       if (interTotal > 0) salaryData.inter = interTotal;
     }
 
@@ -1280,4 +1425,39 @@ function closeModal(id) { const el=document.getElementById('modal-'+id); if(el) 
 // On s'assure qu'elle existe, sinon on crée un stub
 if (typeof computeDiversityScore === 'undefined') {
   window.computeDiversityScore = function() {};
+}
+
+// ─── SERVICE WORKER : auto-nettoyage au démarrage ─────────────────────────
+// Force le rechargement du SW et vide les anciens caches si besoin
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then(regs => {
+    // Désenregistrer les anciens SW (sauf le plus récent)
+    regs.forEach((reg, i) => {
+      if (i > 0) reg.unregister();
+    });
+  });
+  // Écouter les mises à jour SW
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    console.log('[Patrimonia] Nouveau SW actif — rechargement...');
+  });
+}
+
+// ─── VIDER LE CACHE NAVIGATEUR ────────────────────────────────────────────
+async function forceClearCache() {
+  try {
+    // Désenregistrer tous les Service Workers
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister()));
+    }
+    // Vider tous les caches CacheStorage
+    const keys = await caches.keys();
+    await Promise.all(keys.map(k => caches.delete(k)));
+    showToast('Cache vidé — rechargement...', '#22c55e');
+    // Recharger sans cache après 1 seconde
+    setTimeout(() => window.location.reload(true), 1000);
+  } catch(err) {
+    showToast('Erreur: ' + err.message, '#ef4444');
+    window.location.reload(true);
+  }
 }
