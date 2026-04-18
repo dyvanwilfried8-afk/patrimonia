@@ -109,6 +109,7 @@ async function initApp() {
     console.log('Connecté:', currentUser);
     const email = session.user.email || '';
     safeSet('userName', email);
+    safeSet('settingsEmail', email);
     const av = document.getElementById('userAvatar');
     if (av) av.textContent = email.charAt(0).toUpperCase();
     loadLocalData();
@@ -231,12 +232,19 @@ function renderPnlStats(totalAssets) {
 function renderBestWorst() {
   if (!assets.length) return;
   const withPerf = assets.map(a => {
-    const val = assetValue(a), cost = assetCost(a);
-    return { name: a.name || '?', perf: cost > 0 ? (val - cost) / cost * 100 : (a.perfTotal ? a.perfTotal * 100 : 0) };
-  }).sort((a, b) => b.perf - a.perf);
+    // Use sheet's perfTotal if available (already correct), else calculate
+    let perf;
+    if (a.perfTotal && a.perfTotal !== 0) {
+      perf = a.perfTotal * 100; // perfTotal is a ratio like 0.413
+    } else {
+      const val = assetValue(a), cost = assetCost(a);
+      perf = cost > 0 ? (val - cost) / cost * 100 : 0;
+    }
+    return { name: a.name || '?', perf };
+  }).filter(a => !isNaN(a.perf)).sort((a, b) => b.perf - a.perf);
   if (withPerf.length) {
     safeSet('statBestName',  withPerf[0].name);
-    safeSet('statBestPct',   '+' + withPerf[0].perf.toFixed(1) + '%');
+    safeSet('statBestPct',   (withPerf[0].perf >= 0 ? '+' : '') + withPerf[0].perf.toFixed(1) + '%');
     safeSet('statWorstName', withPerf[withPerf.length - 1].name);
     safeSet('statWorstPct',  withPerf[withPerf.length - 1].perf.toFixed(1) + '%');
   }
@@ -309,33 +317,57 @@ function renderPortfolio() {
   const typF = document.getElementById('filterType')?.value   || 'all';
   let filtered = assets.filter(a => (srcF === 'all' || a.source === srcF) && (typF === 'all' || a.type === typF));
   filtered.sort((a, b) => {
-    const va = (a.qty||1)*(a.currentPrice||0), vb = (b.qty||1)*(b.currentPrice||0);
-    const pa = a.buyPrice > 0 ? (a.currentPrice-a.buyPrice)/a.buyPrice*100 : 0;
-    const pb = b.buyPrice > 0 ? (b.currentPrice-b.buyPrice)/b.buyPrice*100 : 0;
-    if (currentSort==='val_desc') return vb-va;
-    if (currentSort==='perf_total_desc') return pb-pa;
-    if (currentSort==='perf_total_asc')  return pa-pb;
-    return vb-va;
+    const va = assetValue(a), vb = assetValue(b);
+    const ca = assetCost(a),  cb = assetCost(b);
+    const pa = ca > 0 ? (va-ca)/ca*100 : 0;
+    const pb = cb > 0 ? (vb-cb)/cb*100 : 0;
+    if (currentSort==='val_desc')         return vb - va;
+    if (currentSort==='perf_total_desc')  return pb - pa;
+    if (currentSort==='perf_total_asc')   return pa - pb;
+    return vb - va;
   });
-  if (!filtered.length) { tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:24px;">Aucun actif — ajoutez-en via Connexions</td></tr>'; return; }
-  const totalVal = filtered.reduce((s, a) => s + (a.qty||1)*(a.currentPrice||0), 0);
-  const typeLabels = { stock:'ETF', crypto:'Crypto', savings:'Épargne', esop:'ESOP' };
+  if (!filtered.length) {
+    tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:24px;">Aucun actif — ajoutez-en via Connexions</td></tr>';
+    return;
+  }
+  const totalVal = filtered.reduce((s, a) => s + assetValue(a), 0);
+  const typeLabels = { stock:'ETF', crypto:'Crypto', savings:'\u00C9pargne', esop:'ESOP' };
+
+  const fmtPct = (v) => {
+    if (v === undefined || v === null || v === 0 || isNaN(v)) return '<span class="perf-zero">\u2013</span>';
+    const pct = typeof v === 'number' && Math.abs(v) <= 1 ? v * 100 : v;
+    const cls = pct >= 0 ? 'perf-pos' : 'perf-neg';
+    return `<span class="${cls}">${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%</span>`;
+  };
+
   tbody.innerHTML = filtered.map(a => {
-    const val=(a.qty||1)*(a.currentPrice||a.buyPrice||0), cost=(a.qty||1)*(a.buyPrice||0);
-    const pnl=val-cost, pnlP=cost>0?((pnl/cost)*100).toFixed(1):'–';
-    const poids=totalVal>0?((val/totalVal)*100).toFixed(1):'–';
-    const pc=pnl>=0?'perf-pos':'perf-neg';
-    // Affiche nom complet + ticker si différents
-    const displayName = a.name || a.ticker || '–';
-    const tickerBadge = a.ticker && a.ticker !== a.name ? `<span style="font-size:10px;color:var(--muted2);margin-left:4px;">${a.ticker}</span>` : '';
-    return `<tr><td><div class="asset-name">${displayName}${tickerBadge} <span class="asset-badge">${typeLabels[a.type]||''}</span></div></td>
-      <td style="color:var(--muted2);font-size:12px;">${a.source||'manuel'}</td>
+    const val   = assetValue(a);
+    const cost  = assetCost(a);
+    const pnl   = val - cost;
+    // Use sheet perfTotal (ratio) if available, otherwise calculate
+    const pnlPct = a.perfTotal && a.perfTotal !== 0
+      ? a.perfTotal * 100
+      : cost > 0 ? (pnl / cost) * 100 : 0;
+    const pnlP   = pnlPct !== 0 ? pnlPct.toFixed(1) : '\u2013';
+    const poids  = totalVal > 0 ? ((val / totalVal) * 100).toFixed(1) : '\u2013';
+    const pc     = pnl >= 0 ? 'perf-pos' : 'perf-neg';
+    const pcT    = pnlPct >= 0 ? 'perf-pos' : 'perf-neg';
+    const displayName = a.name || a.ticker || '\u2013';
+    const pnlSign = pnl >= 0 ? '+' : '';
+    const pctSign = pnlPct >= 0 ? '+' : '';
+    return `<tr>
+      <td><div class="asset-name">${displayName} <span class="asset-badge">${typeLabels[a.type]||''}</span></div></td>
+      <td class="portfolio-col-source" style="color:var(--muted2);font-size:12px;">${a.source||'manuel'}</td>
       <td>${fmt.format(val)}</td>
-      <td class="${pc}">${pnl>=0?'+':''}${fmt.format(pnl)}</td>
-      <td class="${pc}">${pnl>=0?'+':''}${pnlP}%</td>
-      <td class="perf-zero">–</td><td class="perf-zero">–</td><td class="perf-zero">–</td><td class="perf-zero">–</td>
-      <td class="${pc}">${pnl>=0?'+':''}${pnlP}%</td>
-      <td style="color:var(--muted2);">${poids}%</td></tr>`;
+      <td class="${pc}">${pnlSign}${fmt.format(pnl)}</td>
+      <td class="${pcT}">${pctSign}${pnlP}%</td>
+      <td class="portfolio-col-jour">${fmtPct(a.perf1d)}</td>
+      <td class="portfolio-col-hebdo">${fmtPct(a.perfW)}</td>
+      <td class="portfolio-col-mois">${fmtPct(a.perfM)}</td>
+      <td class="portfolio-col-ytd">${fmtPct(a.perfYtd)}</td>
+      <td class="${pcT}">${pctSign}${pnlP}%</td>
+      <td style="color:var(--muted2);">${poids}%</td>
+    </tr>`;
   }).join('');
 }
 
@@ -541,7 +573,21 @@ async function connectSheets() {
   const sheetId = match[1];
   const btn = document.getElementById('importSheetsBtn');
 
-  const p = s => parseFloat((s||'0').toString().replace(',','.')) || 0;
+  // Parse number: handles French locale "1 282,40" → 1282.40, "1.282,40" → 1282.40
+  const p = s => {
+    if (s === null || s === undefined || s === '') return 0;
+    let str = s.toString().trim();
+    // Remove any currency symbols or % signs
+    str = str.replace(/[€$£%\s]/g, '');
+    // If dot is thousands separator (e.g. "1.282,40"), remove dots before comma
+    if (str.includes(',') && str.includes('.') && str.lastIndexOf('.') < str.lastIndexOf(',')) {
+      str = str.replace(/\./g, '');
+    }
+    // Replace comma decimal separator with dot
+    str = str.replace(',', '.');
+    const n = parseFloat(str);
+    return isNaN(n) ? 0 : n;
+  };
   const t = s => (s||'').toString().trim();
 
   async function fetchTab(name) {
@@ -558,54 +604,134 @@ async function connectSheets() {
     assets = assets.filter(a => !a.source?.startsWith('sheets-'));
     let imported = 0;
 
-    // CTO — A=Ticker B=Nom C=Qté D=PRU E=Prix F=Investi G=ValTotale
-    //        H=1J I=Hebdo J=1Mois L=YTD M=Perf% N=Catégorie O=Secteur P=ZoneGéo X=Devise
+    // CTO — A=Ticker B=Nom C=Qté D=PRU E=Prix(devise locale) F=Investi(€) G=ValTotale(€)
+    //        H=1J I=Hebdo J=1Mois K=6Mois L=YTD M=Perf% N=Catégorie O=Secteur P=ZoneGéo
+    //        U=TickerLocal V=TickerYahoo W=Devise X=PrixSecours
+    //        Note: Prix (col E) peut être en USD pour les actions US.
+    //              Investi (col F) et ValTotale (col G) sont TOUJOURS en EUR.
     const ctoRows = await fetchTab('CTO');
     if (ctoRows) {
       ctoRows.slice(1).forEach(row => {
         const ticker = t(row[0]);
-        if (!ticker || ticker.toUpperCase() === 'TOTAL') return;
-        const nom = t(row[1]) || ticker;
-        const qty = p(row[2]); const pru = p(row[3]); const prix = p(row[4]);
-        if (qty === 0 && prix === 0) return;
+        if (!ticker || ticker.toUpperCase() === 'TOTAL' || !ticker) return;
+
+        const nom        = t(row[1]) || ticker;
+        const qty        = p(row[2]);
+        const pru        = p(row[3]);           // PRU en devise locale
+        const prixBrut   = p(row[4]);           // Prix actuel en devise locale (peut être USD)
+        const investi    = p(row[5]);            // Investi en EUR ✓
+        const valTotale  = p(row[6]);            // Valeur totale en EUR ✓ (déjà convertie)
+        const devise     = t(row[23]) || t(row[22]) || 'EUR';
+        const prixSecours = p(row[24]);          // Prix secours (EUR)
+
+        // Ignorer les lignes vides
+        if (qty === 0 && valTotale === 0 && investi === 0) return;
+
+        // Prix affiché : utiliser valTotale/qty si dispo (déjà en EUR)
+        // Sinon prix brut (attention : peut être USD si devise='USD')
+        const prixEUR = valTotale > 0 && qty > 0 ? valTotale / qty
+                      : prixSecours > 0 ? prixSecours
+                      : prixBrut;
+
         const geoRaw = t(row[15]).toLowerCase();
-        const geoMap = {'usa':'us','etats-unis':'us','états-unis':'us','europe':'eu','france':'fr','monde':'world','emergent':'em','emergents':'em'};
-        const geo = geoMap[geoRaw] || 'world';
+        const geoMap = {'usa':'us','états-unis':'us','etats-unis':'us','europe':'eu',
+                        'france':'fr','monde':'world','emergent':'em','emergents':'em'};
+        const geo    = geoMap[geoRaw] || 'world';
         const secRaw = t(row[14]).toLowerCase();
-        const sector = secRaw.includes('tech')?'tech':secRaw.includes('nerg')?'energy':secRaw.includes('inanc')?'finance':secRaw.includes('sant')||secRaw.includes('alth')?'health':secRaw.includes('onautique')||secRaw.includes('ndustri')?'industry':secRaw.includes('rypto')?'crypto':'mixed';
-        assets.push({ name:`${nom} (${ticker})`, ticker, source:'sheets-cto', type:'stock',
-          qty, buyPrice:pru, currentPrice:prix, investi:p(row[5]), valTotale:p(row[6]),
-          perf1d:p(row[7]), perfW:p(row[8]), perfM:p(row[9]), perfYtd:p(row[11]), perfTotal:p(row[12]),
-          geo, sector, currency:t(row[23])||'EUR', fees:0 });
+        const sector = secRaw.includes('tech')     ? 'tech'
+                     : secRaw.includes('nerg')     ? 'energy'
+                     : secRaw.includes('inanc')    ? 'finance'
+                     : secRaw.includes('sant') || secRaw.includes('alth') ? 'health'
+                     : secRaw.includes('onautique') || secRaw.includes('ndustri') ? 'industry'
+                     : secRaw.includes('rypto')    ? 'crypto'
+                     : 'mixed';
+
+        assets.push({
+          name:         `${nom} (${ticker})`,
+          ticker,
+          source:       'sheets-cto',
+          type:         'stock',
+          qty,
+          buyPrice:     pru,           // PRU en devise locale (pour calcul % relatif)
+          currentPrice: prixEUR,       // Prix en EUR
+          investi,                     // Coût total en EUR ✓
+          valTotale,                   // Valeur totale en EUR ✓
+          perf1d:   p(row[7]),
+          perfW:    p(row[8]),
+          perfM:    p(row[9]),
+          perfYtd:  p(row[11]),
+          perfTotal:p(row[12]),
+          geo, sector,
+          currency: devise,
+          fees:     0,
+        });
         imported++;
       });
     }
 
-    // AIRBUS — A=Année B=Enveloppe C=Nom D=Investi H=TotalQté I=PRUAchat K=Cours L=ValTotale M=Perf%
+    // AIRBUS — A=Année B=Enveloppe C=Nom D=Investi E=ActionsAchetées F=ActionsOffertes
+    //          G=PartsDividendes H=TotalQté I=PRUAchat J=PRURéel K=Cours L=ValTotale M=Perf%
     const airbusRows = await fetchTab('AIRBUS');
     if (airbusRows) {
       let interTotal = 0;
       airbusRows.slice(1).forEach(row => {
-        const enveloppe = t(row[1]).toUpperCase();
-        const nom = t(row[2]);
+        const enveloppe = t(row[1]).toUpperCase();  // PEG ou PERCOL
+        const nom       = t(row[2]);
         if (!nom || nom.toUpperCase() === 'TOTAL' || !enveloppe) return;
-        const investi = p(row[3]); const totalQty = p(row[7]);
-        const pruAchat = p(row[8]); const cours = p(row[10]);
-        const valTotale = p(row[11]); const perf = p(row[12]);
-        // Intéressement → salaryData uniquement
-        if (nom.toLowerCase().includes('int\u00e9ressement') || nom.toLowerCase() === 'int\u00e9ressement') {
+
+        const investi   = p(row[3]);
+        const totalQty  = p(row[7]);
+        const pruAchat  = p(row[8]);
+        const cours     = p(row[10]);
+        const valTotale = p(row[11]);
+        const perf      = p(row[12]);
+
+        // Intéressement → salaryData uniquement (pas dans le portefeuille)
+        const nomLower = nom.toLowerCase()
+          .normalize('NFD').replace(/[\u0300-\u036f]/g, ''); // remove accents
+        if (nomLower.includes('interessement') || nomLower.includes('participation')) {
           if (investi > 0) interTotal += investi;
-          return;
+          return; // ne pas créer d'actif
         }
+
+        // Ignorer lignes 100% vides
         if (valTotale === 0 && totalQty === 0 && investi === 0) return;
-        const ticker = (enveloppe === 'PEG') ? 'EPA:AIR' : (nom.toLowerCase().includes('airbus') ? 'EPA:AIR' : 'PME');
-        const serial = p(row[0]);
-        const annee = serial > 40000 ? new Date(Math.round((serial-25569)*86400*1000)).getFullYear() : '';
-        assets.push({ name:`${nom} ${enveloppe} ${annee}`, ticker, source:'sheets-airbus', type:'esop',
-          qty:totalQty, buyPrice:pruAchat, currentPrice:cours, investi, valTotale, perfTotal:perf,
-          enveloppe, geo:'eu', sector:'industry', currency:'EUR', fees:0 });
+
+        const ticker   = (nom.toLowerCase().includes('airbus') || nom.toLowerCase().includes('esop') || enveloppe === 'PEG')
+                        ? 'EPA:AIR' : 'PERCOL-PME';
+        const serial   = p(row[0]);
+        const annee    = serial > 40000
+          ? new Date(Math.round((serial - 25569) * 86400 * 1000)).getFullYear()
+          : '';
+
+        // Calcul valeur : préférer valTotale de la feuille (déjà en EUR)
+        // Sinon qty * cours
+        const val = valTotale > 0 ? valTotale : (totalQty > 0 && cours > 0 ? totalQty * cours : 0);
+        if (val === 0 && investi === 0) return;
+
+        const displayName = `${nom} ${enveloppe} ${annee}`.trim();
+
+        assets.push({
+          name:         displayName,
+          ticker,
+          source:       'sheets-airbus',
+          type:         'esop',
+          qty:          totalQty,
+          buyPrice:     pruAchat,
+          currentPrice: cours,
+          investi,
+          valTotale:    val,
+          perfTotal:    perf,
+          enveloppe,
+          geo:          'eu',
+          sector:       'industry',
+          currency:     'EUR',
+          fees:         0,
+        });
         imported++;
       });
+
+      // L'intéressement va dans le salaire annuel
       if (interTotal > 0) salaryData.inter = interTotal;
     }
 
@@ -885,6 +1011,263 @@ function clearData() {
   if(!confirm('Réinitialiser ? Action irréversible.')) return;
   ['patrimonia_assets','patrimonia_savings','patrimonia_expenses','patrimonia_salary','patrimonia_settings'].forEach(k=>localStorage.removeItem(k));
   loadLocalData(); initOverview(); showToast('Données réinitialisées','#f59e0b');
+}
+
+// ─── SUPPRESSION COMPTE ──────────────────────────────────────────────────
+
+function checkDeleteConfirm() {
+  const val = document.getElementById('deleteConfirmText')?.value || '';
+  const btn = document.getElementById('deleteAccountBtn');
+  if (!btn) return;
+  const ok = val.trim().toUpperCase() === 'SUPPRIMER';
+  btn.disabled = !ok;
+  btn.style.opacity = ok ? '1' : '0.4';
+  btn.style.cursor  = ok ? 'pointer' : 'not-allowed';
+}
+
+function deleteAccount() {
+  closeModal('deleteAccount');
+  document.getElementById('deletePassword').value = '';
+  document.getElementById('deleteErrorMsg').style.display = 'none';
+  openModal('deletePassword');
+}
+
+async function confirmDeleteAccount() {
+  const password = document.getElementById('deletePassword')?.value?.trim();
+  const errEl    = document.getElementById('deleteErrorMsg');
+  const btnEl    = document.getElementById('deletePasswordBtn');
+  if (!password) { if(errEl){errEl.textContent='Entrez votre mot de passe.';errEl.style.display='block';} return; }
+  if (btnEl) { btnEl.textContent = 'Suppression...'; btnEl.disabled = true; }
+  try {
+    // 1. Ré-authentifier
+    const { data: { session } } = await sb.auth.getSession();
+    const email = session?.user?.email;
+    if (!email) throw new Error('Session expirée, reconnectez-vous.');
+    const { error: signInErr } = await sb.auth.signInWithPassword({ email, password });
+    if (signInErr) throw new Error('Mot de passe incorrect.');
+    // 2. Effacer les données locales
+    ['patrimonia_assets','patrimonia_savings','patrimonia_expenses','patrimonia_salary','patrimonia_settings','patrimonia_dividends','patrimonia_theme'].forEach(k=>localStorage.removeItem(k));
+    // 3. Supprimer le compte Supabase
+    const { error: delErr } = await sb.auth.admin?.deleteUser(session.user.id)
+      .catch(()=>({error:null})) || {};
+    // 4. Déconnexion propre (même si delete échoue, l'user est déconnecté)
+    await sb.auth.signOut();
+    showToast('Compte supprimé. Au revoir !', '#22c55e');
+    setTimeout(()=>{ window.location.href='index.html'; }, 2000);
+  } catch(err) {
+    if(errEl){ errEl.textContent = err.message; errEl.style.display='block'; }
+    if(btnEl){ btnEl.textContent='Supprimer mon compte'; btnEl.disabled=false; }
+  }
+}
+
+// ─── IMPORT FICHIER CSV / XLSX / JSON ────────────────────────────────────
+
+let _pendingFileAssets = [];
+
+function handleFileDrop(event) {
+  event.preventDefault();
+  document.getElementById('fileDropZone').style.borderColor = 'var(--border2)';
+  const file = event.dataTransfer.files[0];
+  if (file) processImportFile(file);
+}
+
+function handleFileImport(event) {
+  const file = event.target.files[0];
+  if (file) processImportFile(file);
+}
+
+function processImportFile(file) {
+  const ext = file.name.split('.').pop().toLowerCase();
+  const preview = document.getElementById('fileImportPreview');
+  const status  = document.getElementById('fileImportStatus');
+  if (preview) preview.innerHTML = '<div style="font-size:12px;color:var(--muted2);">Lecture du fichier...</div>';
+
+  if (ext === 'json') {
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        const d = JSON.parse(e.target.result);
+        // JSON Patrimonia export
+        if (d.assets) {
+          if(d.assets) assets=d.assets;
+          if(d.savings) savings=d.savings;
+          if(d.expenses) expenses=d.expenses;
+          if(d.salaryData) salaryData=d.salaryData;
+          if(d.settings) settings=d.settings;
+          saveLocalData(); initOverview();
+          if(status){status.textContent='Importé';status.className='badge badge-up';}
+          if(preview) preview.innerHTML=`<div style="font-size:12px;color:var(--green);">${assets.length} actifs importés depuis JSON ✓</div>`;
+          showToast('Données JSON importées ✓','#22c55e');
+        } else {
+          // JSON tableau d'actifs
+          const arr = Array.isArray(d) ? d : [];
+          _pendingFileAssets = arr;
+          showFilePreview(arr, file.name);
+        }
+      } catch(err){ if(preview) preview.innerHTML=`<div style="font-size:12px;color:var(--danger);">Erreur: ${err.message}</div>`; }
+    };
+    reader.readAsText(file);
+  } else if (ext === 'csv') {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const parsed = parseCSV(e.target.result);
+      _pendingFileAssets = parsed;
+      showFilePreview(parsed, file.name);
+    };
+    reader.readAsText(file, 'UTF-8');
+  } else if (ext === 'xlsx' || ext === 'xls') {
+    // XLSX nécessite la librairie SheetJS — on charge dynamiquement
+    if (typeof XLSX === 'undefined') {
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+      script.onload = () => readXLSX(file);
+      script.onerror = () => { if(preview) preview.innerHTML='<div style="font-size:12px;color:var(--danger);">Impossible de charger le lecteur XLSX. Vérifiez votre connexion.</div>'; };
+      document.head.appendChild(script);
+    } else {
+      readXLSX(file);
+    }
+  } else {
+    if(preview) preview.innerHTML='<div style="font-size:12px;color:var(--danger);">Format non supporté. Utilisez CSV, XLSX ou JSON.</div>';
+  }
+}
+
+function readXLSX(file) {
+  const preview = document.getElementById('fileImportPreview');
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const wb = XLSX.read(e.target.result, { type:'array' });
+      // Cherche d'abord CTO, puis prend le premier onglet
+      const sheetName = wb.SheetNames.includes('CTO') ? 'CTO'
+                      : wb.SheetNames.includes('Crypto') ? 'Crypto'
+                      : wb.SheetNames[0];
+      const ws = wb.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:'' });
+      // Détecter si structure Patrimonia (Ticker en col A, Nom en col B)
+      const detected = [];
+      rows.slice(1).forEach(row => {
+        const ticker = (row[0]||'').toString().trim();
+        if (!ticker || ticker.toUpperCase() === 'TOTAL') return;
+        const nom = (row[1]||ticker).toString().trim();
+        const qty  = parseFloat((row[2]||'0').toString()) || 0;
+        const pru  = parseFloat((row[3]||'0').toString()) || 0;
+        const prix = parseFloat((row[4]||'0').toString()) || 0;
+        if (qty === 0 && prix === 0) return;
+        detected.push({ ticker, nom, qty, pru, prix,
+          investi:  parseFloat((row[5]||'0').toString()) || 0,
+          valTotale:parseFloat((row[6]||'0').toString()) || 0,
+          perf1d:   parseFloat((row[7]||'0').toString()) || 0,
+          perfYtd:  parseFloat((row[11]||'0').toString()) || 0,
+          secteur:  (row[14]||'').toString(),
+          geo:      (row[15]||'').toString(),
+          devise:   (row[23]||'EUR').toString() || 'EUR',
+          type:     sheetName.toLowerCase().includes('rypto') ? 'crypto' : sheetName.toLowerCase().includes('irbus') ? 'esop' : 'stock',
+          source:   'file-' + sheetName.toLowerCase(),
+        });
+      });
+      _pendingFileAssets = detected;
+      showFilePreview(detected, file.name + ' [' + sheetName + ']');
+    } catch(err){ if(preview) preview.innerHTML=`<div style="font-size:12px;color:var(--danger);">Erreur XLSX: ${err.message}</div>`; }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function parseCSV(text) {
+  const lines = text.replace(/\r/g,'').split('\n').filter(l=>l.trim());
+  if (!lines.length) return [];
+  // Détect séparateur (virgule ou point-virgule ou tab)
+  const sep = lines[0].includes('\t') ? '\t' : lines[0].split(';').length > lines[0].split(',').length ? ';' : ',';
+  const headers = lines[0].split(sep).map(h=>h.trim().replace(/^["']|["']$/g,'').toLowerCase());
+  const result = [];
+  const colIdx = (names) => { for(const n of names){ const i=headers.indexOf(n); if(i>=0)return i; } return -1; };
+  const iT = colIdx(['ticker','actif','symbole','symbol','isin']);
+  const iN = colIdx(['nom','name','libelle','libellé']);
+  const iQ = colIdx(['quantité','quantite','quantity','qté','qty']);
+  const iP = colIdx(['pru','prix achat','buy price','pa','prix moyen','cost']);
+  const iC = colIdx(['prix','price','cours','valeur unitaire','current price','prix actuel','cours actuel']);
+  const iV = colIdx(['val. totale','val totale','value','valeur','total value','montant']);
+  const iI = colIdx(['investi','invested','montant investi']);
+  lines.slice(1).forEach(line => {
+    const cols = line.split(sep).map(c=>c.trim().replace(/^["']|["']$/g,''));
+    const ticker = iT>=0 ? cols[iT] : cols[0];
+    if (!ticker || ticker.toUpperCase() === 'TOTAL') return;
+    const nom = iN>=0 ? cols[iN] : ticker;
+    const qty = parseFloat(cols[iQ>=0?iQ:2]) || 0;
+    const pru = parseFloat(cols[iP>=0?iP:3]) || 0;
+    const prix= parseFloat(cols[iC>=0?iC:4]) || 0;
+    if (qty===0 && prix===0) return;
+    result.push({ ticker, nom, qty, pru, prix,
+      investi:  iI>=0 ? parseFloat(cols[iI])||0 : qty*pru,
+      valTotale:iV>=0 ? parseFloat(cols[iV])||0 : qty*prix,
+      type:'stock', source:'file-csv' });
+  });
+  return result;
+}
+
+function showFilePreview(parsedAssets, filename) {
+  const preview = document.getElementById('fileImportPreview');
+  const status  = document.getElementById('fileImportStatus');
+  const btn     = document.getElementById('fileImportBtn');
+  if (!preview) return;
+  if (!parsedAssets.length) {
+    preview.innerHTML='<div style="font-size:12px;color:var(--danger);">Aucun actif détecté. Vérifiez le format.</div>';
+    return;
+  }
+  if(status){ status.textContent=parsedAssets.length+' actifs détectés'; status.className='badge badge-up'; }
+  if(btn){ btn.style.display='block'; }
+  const rows = parsedAssets.slice(0,8).map(a=>
+    `<tr><td style="font-size:12px;padding:4px 6px;font-weight:500;">${a.ticker||'?'}</td>
+     <td style="font-size:11px;padding:4px 6px;color:var(--muted2);">${(a.nom||'').substring(0,20)}</td>
+     <td style="font-size:12px;padding:4px 6px;">${a.qty||0}</td>
+     <td style="font-size:12px;padding:4px 6px;">${fmt.format(a.prix||0)}</td>
+     <td style="font-size:12px;padding:4px 6px;color:var(--green);">${fmt.format(a.valTotale||a.qty*a.prix||0)}</td></tr>`
+  ).join('');
+  preview.innerHTML = `
+    <div style="font-size:11px;color:var(--muted2);margin-bottom:6px;">Aperçu — ${filename} (${parsedAssets.length} lignes)</div>
+    <div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;">
+      <thead><tr>
+        <th style="font-size:10px;text-transform:uppercase;color:var(--muted);padding:4px 6px;text-align:left;">Ticker</th>
+        <th style="font-size:10px;text-transform:uppercase;color:var(--muted);padding:4px 6px;text-align:left;">Nom</th>
+        <th style="font-size:10px;text-transform:uppercase;color:var(--muted);padding:4px 6px;">Qté</th>
+        <th style="font-size:10px;text-transform:uppercase;color:var(--muted);padding:4px 6px;">Prix</th>
+        <th style="font-size:10px;text-transform:uppercase;color:var(--muted);padding:4px 6px;">Valeur</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+    ${parsedAssets.length > 8 ? `<div style="font-size:11px;color:var(--muted2);margin-top:6px;">... et ${parsedAssets.length-8} autres actifs</div>` : ''}`;
+}
+
+function confirmFileImport() {
+  if (!_pendingFileAssets.length) return;
+  // Supprimer les anciens actifs de la même source
+  const firstSrc = _pendingFileAssets[0]?.source || 'file';
+  assets = assets.filter(a => a.source !== firstSrc);
+  // Ajouter les nouveaux
+  _pendingFileAssets.forEach(a => {
+    const geoRaw = (a.geo||'').toLowerCase();
+    const geoMap = {'usa':'us','etats-unis':'us','états-unis':'us','europe':'eu','france':'fr','monde':'world','emergent':'em','emergents':'em'};
+    const secRaw = (a.secteur||'').toLowerCase();
+    assets.push({
+      name: a.nom && a.nom !== a.ticker ? `${a.nom} (${a.ticker})` : a.ticker,
+      ticker: a.ticker,
+      source: a.source || 'file',
+      type:   a.type || 'stock',
+      qty:    a.qty, buyPrice: a.pru, currentPrice: a.prix,
+      investi: a.investi, valTotale: a.valTotale,
+      perf1d:  a.perf1d||0, perfYtd: a.perfYtd||0, perfTotal: a.perfTotal||0,
+      geo:    geoMap[geoRaw] || 'world',
+      sector: secRaw.includes('tech')?'tech':secRaw.includes('nerg')?'energy':secRaw.includes('inanc')?'finance':secRaw.includes('rypto')?'crypto':'mixed',
+      currency: a.devise||'EUR', fees:0,
+    });
+  });
+  saveLocalData(); initOverview();
+  showToast(`${_pendingFileAssets.length} actifs import\u00E9s \u2713`, '#22c55e');
+  const status = document.getElementById('fileImportStatus');
+  if(status){ status.textContent='Import\u00E9'; status.className='badge badge-up'; }
+  const btn = document.getElementById('fileImportBtn');
+  if(btn) btn.style.display='none';
+  _pendingFileAssets = [];
+  if(typeof renderPortfolio==='function') renderPortfolio();
 }
 
 // ─── MODALS ──────────────────────────────────────────────────────────────
