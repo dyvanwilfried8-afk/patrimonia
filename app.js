@@ -212,6 +212,13 @@ function renderCategoryCards(totalAssets, totalSav, total) {
   el.innerHTML = rows.length ? rows.join('') : '<div class="empty-state"><div class="icon">\uD83D\uDCCA</div><p>Ajoutez vos actifs via <b>Connexions</b></p></div>';
 }
 
+function normalizePct(v) {
+  // Normalize: ratio (e.g. 0.476) or already % (e.g. 47.6)
+  // Use sign-aware threshold: if |v| <= 2 → ratio, else already %
+  if (v === undefined || v === null || isNaN(v)) return 0;
+  return Math.abs(v) <= 2 ? v * 100 : v;
+}
+
 function renderPnlStats(totalAssets) {
   const invested = assets.reduce((s, a) => s + assetCost(a), 0);
   const pnl = totalAssets - invested;
@@ -221,7 +228,38 @@ function renderPnlStats(totalAssets) {
   if (el) { el.textContent = fmt.format(pnl); el.style.color = color; }
   safeSet('kpi-pnl-pct', (pnl >= 0 ? '+' : '') + pnlPct + '%');
   safeSet('statPositions', assets.length);
-  [['statD1', pnl * 0.003], ['statW1', pnl * 0.012], ['statM1', pnl * 0.04], ['statYtd', pnl * 0.11]].forEach(([id, v]) => {
+
+  // Update inline P&L in hero section (next to total)
+  const inlineEl = document.getElementById('kpi-pnl-inline');
+  if (inlineEl) {
+    inlineEl.textContent = (pnl >= 0 ? '+' : '') + fmt.format(pnl);
+    inlineEl.style.color = color;
+  }
+  const inlinePctEl = document.getElementById('kpi-pnl-pct-inline');
+  if (inlinePctEl) {
+    inlinePctEl.textContent = (pnl >= 0 ? '+' : '') + pnlPct + '%';
+    inlinePctEl.className = 'badge ' + (pnl >= 0 ? 'badge-up' : 'badge-down');
+  }
+
+  // Compute actual daily/weekly/monthly/YTD P&L from asset data
+  const computePeriodPnl = (field) => {
+    return assets.reduce((s, a) => {
+      const val = assetValue(a);
+      const pctRaw = a[field];
+      if (!pctRaw || isNaN(pctRaw)) return s;
+      const pct = normalizePct(pctRaw) / 100;
+      // reverse: val / (1 + pct) = val_before, delta = val - val_before
+      const delta = val - val / (1 + pct);
+      return s + delta;
+    }, 0);
+  };
+
+  const d1Val  = computePeriodPnl('perf1d');
+  const w1Val  = computePeriodPnl('perfW');
+  const m1Val  = computePeriodPnl('perfM');
+  const ytdVal = computePeriodPnl('perfYtd');
+
+  [['statD1', d1Val], ['statW1', w1Val], ['statM1', m1Val], ['statYtd', ytdVal]].forEach(([id, v]) => {
     const e = document.getElementById(id);
     if (!e) return;
     e.textContent = (v >= 0 ? '+' : '') + fmt.format(v);
@@ -232,11 +270,9 @@ function renderPnlStats(totalAssets) {
 function renderBestWorst() {
   if (!assets.length) return;
   const withPerf = assets.map(a => {
-    // Use sheet's perfTotal if available (already correct), else calculate
     let perf;
     if (a.perfTotal && a.perfTotal !== 0) {
-      // Normalize: ratio (0.476) or already % (47.6)
-      perf = Math.abs(a.perfTotal) <= 2 ? a.perfTotal * 100 : a.perfTotal;
+      perf = normalizePct(a.perfTotal);
     } else {
       const val = assetValue(a), cost = assetCost(a);
       perf = cost > 0 ? (val - cost) / cost * 100 : 0;
@@ -274,29 +310,94 @@ function toggleSavingsFilter() {
   initOverview();
 }
 
+let currentHistoPeriod = 'YTD';
+
 function renderHistoChart(total) {
   const ctx = document.getElementById('chartHistorique');
   if (!ctx) return;
   if (chartHistoInstance) chartHistoInstance.destroy();
-  const pts = 12, labels = [], data = [], now = new Date();
-  for (let i = pts; i >= 0; i--) {
-    const d = new Date(now); d.setMonth(d.getMonth() - i);
-    labels.push(d.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' }));
-    data.push(Math.round(total * (1 - (i / pts) * 0.25)));
+
+  const now = new Date();
+  const labels = [], data = [];
+
+  // Build realistic historical curve using per-asset period performances
+  // We reconstruct the curve: current value - period gain = starting value, then interpolate
+  const buildCurve = (pts, monthsBack, perfField) => {
+    const labels = [], data = [];
+    // Compute total value going back by period, using per-asset perfs
+    const totalPeriodPnl = assets.reduce((s, a) => {
+      const val = assetValue(a);
+      const pctRaw = a[perfField];
+      if (!pctRaw || isNaN(pctRaw)) return s;
+      const pct = normalizePct(pctRaw) / 100;
+      return s + (val - val / (1 + pct));
+    }, 0);
+    const savTotal = showSavingsInTotal ? savings.reduce((s,sv)=>s+(sv.balance||0), 0) : 0;
+    const startVal = total - totalPeriodPnl;
+
+    for (let i = pts; i >= 0; i--) {
+      const d = new Date(now);
+      if (monthsBack <= 1) {
+        d.setDate(d.getDate() - Math.round(i * (monthsBack * 30) / pts));
+        labels.push(d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }));
+      } else {
+        d.setDate(d.getDate() - Math.round(i * (monthsBack * 30) / pts));
+        labels.push(d.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' }));
+      }
+      // Smooth interpolation with slight curve
+      const t = 1 - i / pts;
+      const eased = t < 0.5 ? 2*t*t : -1+(4-2*t)*t; // ease in-out
+      data.push(Math.round(startVal + (total - startVal) * eased));
+    }
+    data[data.length - 1] = total;
+    return { labels, data };
+  };
+
+  let curve;
+  switch(currentHistoPeriod) {
+    case '1J':   curve = buildCurve(24, 1/30, 'perf1d');  break;
+    case '7J':   curve = buildCurve(7,  7/30, 'perfW');   break;
+    case '1M':   curve = buildCurve(30, 1,    'perfM');   break;
+    case '3M':   curve = buildCurve(12, 3,    'perfM');   break;
+    case 'YTD': {
+      // months since Jan 1
+      const monthsSinceJan = now.getMonth() + now.getDate()/30;
+      curve = buildCurve(Math.max(6, Math.round(monthsSinceJan * 4)), monthsSinceJan, 'perfYtd');
+      break;
+    }
+    case '1A':   curve = buildCurve(12, 12, 'perfYtd');  break;
+    default:     curve = buildCurve(12, 12, 'perfYtd');  break;
   }
-  data[data.length - 1] = total;
+
+  // Determine chart color based on gain/loss
+  const isUp = curve.data[curve.data.length-1] >= curve.data[0];
+  const lineColor = isUp ? '#3b82f6' : '#ef4444';
+  const fillColor = isUp ? 'rgba(59,130,246,0.08)' : 'rgba(239,68,68,0.06)';
+
   chartHistoInstance = new Chart(ctx.getContext('2d'), {
     type: 'line',
-    data: { labels, datasets: [{ data, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.08)', fill: true, tension: 0.4, pointRadius: 0, borderWidth: 2 }] },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
-      scales: { y: { display: false }, x: { grid: { display: false }, ticks: { color: getComputedStyle(document.documentElement).getPropertyValue('--muted2')||'#52525b', font: { size: 10 }, maxTicksLimit: 6 } } } }
+    data: { labels: curve.labels, datasets: [{ data: curve.data, borderColor: lineColor, backgroundColor: fillColor, fill: true, tension: 0.4, pointRadius: 0, borderWidth: 2 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: {
+        callbacks: { label: ctx => fmt.format(ctx.parsed.y) }
+      }},
+      scales: {
+        y: { display: false },
+        x: { grid: { display: false }, ticks: { color: getComputedStyle(document.documentElement).getPropertyValue('--muted2')||'#52525b', font: { size: 10 }, maxTicksLimit: 6 } }
+      }
+    }
   });
 }
 
 function setHistoPeriod(period, btn) {
+  currentHistoPeriod = period;
   document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active', 'active-default'));
   btn.classList.add('active');
-  initOverview();
+  const totalAssets = assets.reduce((s, a) => s + assetValue(a), 0);
+  const totalSav    = savings.reduce((s, sv) => s + (sv.balance || 0), 0);
+  const total       = showSavingsInTotal ? totalAssets + totalSav : totalAssets;
+  renderHistoChart(total);
 }
 
 // ─── PORTEFEUILLE ────────────────────────────────────────────────────────
@@ -316,7 +417,9 @@ function renderPortfolio() {
   if (!tbody) return;
   const srcF = document.getElementById('filterSource')?.value || 'all';
   const typF = document.getElementById('filterType')?.value   || 'all';
-  let filtered = assets.filter(a => (srcF === 'all' || a.source === srcF) && (typF === 'all' || a.type === typF));
+  // Exclude EPA:AIR from CTO tab — it's already counted in ESOP/AIRBUS tab
+  let filtered = assets.filter(a => (srcF === 'all' || a.source === srcF) && (typF === 'all' || a.type === typF))
+    .filter(a => !(a.source === 'sheets-cto' && a.ticker === 'EPA:AIR'));
   filtered.sort((a, b) => {
     const va = assetValue(a), vb = assetValue(b);
     const ca = assetCost(a),  cb = assetCost(b);
@@ -336,9 +439,7 @@ function renderPortfolio() {
 
   const fmtPct = (v) => {
     if (v === undefined || v === null || isNaN(v)) return '<span class="perf-zero">\u2013</span>';
-    // Normalize: if |v| <= 2, it's a ratio (0.476) → multiply by 100
-    //            if |v| > 2, it's already a % value (47.6) → use as-is
-    const pct = Math.abs(v) <= 2 ? v * 100 : v;
+    const pct = normalizePct(v);
     if (Math.abs(pct) < 0.001) return '<span class="perf-zero">\u2013</span>';
     const cls = pct >= 0 ? 'perf-pos' : 'perf-neg';
     return `<span class="${cls}">${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%</span>`;
@@ -348,10 +449,8 @@ function renderPortfolio() {
     const val   = assetValue(a);
     const cost  = assetCost(a);
     const pnl   = val - cost;
-    // perfTotal from sheet can be ratio (0.476) or % string stripped (47.6)
-    // fmtPct handles both via the <=2 threshold normalization
     const pnlPct = a.perfTotal && a.perfTotal !== 0
-      ? (Math.abs(a.perfTotal) <= 2 ? a.perfTotal * 100 : a.perfTotal)
+      ? normalizePct(a.perfTotal)
       : cost > 0 ? (pnl / cost) * 100 : 0;
     const pnlP   = Math.abs(pnlPct) > 0.01 ? pnlPct.toFixed(1) : '\u2013';
     const poids  = totalVal > 0 ? ((val / totalVal) * 100).toFixed(1) : '\u2013';
@@ -426,10 +525,7 @@ function renderAssetChart() {
     return raw || 0;
   };
 
-  const normPct = (v) => {
-    if (!v || isNaN(v)) return 0;
-    return Math.abs(v) <= 2 ? v * 100 : v;
-  };
+  const normPct = (v) => normalizePct(v);
 
   // Build bar chart data — top 10 by value
   const displayAssets = isGlobal
@@ -982,33 +1078,111 @@ function saveSettings() {
 function renderDividendsOverview() {
   const divEl = document.getElementById('dividendsOverview');
   if (!divEl) return;
-  // Dividendes enregistrés manuellement ou depuis Sheets
+
   let divs = [];
   try { divs = JSON.parse(localStorage.getItem('patrimonia_dividends')||'[]'); } catch(e){}
-  // Calcul dividendes annuels estimés depuis les actifs
+
+  // Aggregate dividends from history: group by ticker then by year
+  const byTickerYear = {};
+  divs.forEach(d => {
+    if (!d.amount || d.amount <= 0) return;
+    const ticker = d.ticker || '?';
+    // Parse date to get year
+    let year = new Date().getFullYear();
+    if (d.date) {
+      const parts = d.date.split('/');
+      if (parts.length === 3) year = parseInt(parts[2]) || year;
+      else { const dt = new Date(d.date); if (!isNaN(dt)) year = dt.getFullYear(); }
+    }
+    if (!byTickerYear[ticker]) byTickerYear[ticker] = {};
+    byTickerYear[ticker][year] = (byTickerYear[ticker][year] || 0) + d.amount;
+  });
+
+  // Estimated annual dividends from asset dividend/action field
   const annualDivs = assets.filter(a => (a.dividend||0) > 0).map(a => ({
-    name: a.name||a.ticker||'?',
+    name: a.name || a.ticker || '?',
+    ticker: a.ticker || '?',
     annual: (a.qty||1) * (a.dividend||0),
     yield: a.currentPrice > 0 ? ((a.dividend||0)/a.currentPrice*100).toFixed(2) : '–'
   }));
-  const totalAnnual = annualDivs.reduce((s,d)=>s+d.annual,0);
+  const totalAnnualEstim = annualDivs.reduce((s,d)=>s+d.annual,0);
+
+  // Total received this year from history
+  const currentYear = new Date().getFullYear();
+  const totalReceivedThisYear = divs.filter(d => {
+    if (!d.date) return false;
+    const parts = d.date.split('/');
+    const yr = parts.length===3 ? parseInt(parts[2]) : new Date(d.date).getFullYear();
+    return yr === currentYear;
+  }).reduce((s,d)=>s+(d.amount||0),0);
+
   if (!divs.length && !annualDivs.length) {
-    divEl.innerHTML = '<div style="font-size:13px;color:var(--muted2);padding:8px 0;">Aucun dividende enregistré. Renseignez le montant de dividende/action dans votre Google Sheet (col. F).</div>';
+    divEl.innerHTML = '<div style="font-size:13px;color:var(--muted2);padding:8px 0;">Aucun dividende enregistré. Renseignez le montant dividende/action dans votre Google Sheet ou la colonne "Suivi CTO".</div>';
     return;
   }
+
   let html = '';
-  if (totalAnnual > 0) {
-    html += `<div style="margin-bottom:12px;padding:12px;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.15);border-radius:8px;">
-      <div style="font-size:11px;color:var(--muted2);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">Dividendes estimés / an</div>
-      <div style="font-size:22px;font-weight:600;color:var(--green);">${fmt.format(totalAnnual)}</div>
-      <div style="font-size:11px;color:var(--muted2);">soit ${fmt.format(totalAnnual/12)}/mois</div>
+
+  // Summary cards
+  const totalToShow = totalReceivedThisYear || totalAnnualEstim;
+  if (totalToShow > 0) {
+    html += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+      <div style="padding:14px;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.15);border-radius:8px;">
+        <div style="font-size:11px;color:var(--muted2);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">Reçus ${currentYear}</div>
+        <div style="font-size:22px;font-weight:600;color:var(--green);">${fmt.format(totalReceivedThisYear)}</div>
+        <div style="font-size:11px;color:var(--muted2);">soit ${fmt.format(totalReceivedThisYear/12)}/mois</div>
+      </div>
+      ${totalAnnualEstim > 0 ? `<div style="padding:14px;background:rgba(139,92,246,0.06);border:1px solid rgba(139,92,246,0.15);border-radius:8px;">
+        <div style="font-size:11px;color:var(--muted2);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">Estimé annuel</div>
+        <div style="font-size:22px;font-weight:600;color:var(--accent2);">${fmt.format(totalAnnualEstim)}</div>
+        <div style="font-size:11px;color:var(--muted2);">basé sur div/action</div>
+      </div>` : ''}
     </div>`;
+  }
+
+  // Dividends aggregated by asset per year (from history)
+  if (Object.keys(byTickerYear).length > 0) {
+    const years = [...new Set(divs.map(d => {
+      if (!d.date) return currentYear;
+      const parts = d.date.split('/');
+      return parts.length===3 ? parseInt(parts[2]) : new Date(d.date).getFullYear();
+    }))].sort((a,b)=>b-a);
+
+    html += `<div style="font-size:12px;font-weight:600;color:var(--muted2);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;">Par actif — historique reçu</div>`;
+    html += `<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead><tr>
+        <th style="text-align:left;padding:6px 10px;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:var(--muted);font-weight:500;">Actif</th>
+        ${years.map(y=>`<th style="text-align:right;padding:6px 10px;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:var(--muted);font-weight:500;">${y}</th>`).join('')}
+      </tr></thead>
+      <tbody>
+        ${Object.entries(byTickerYear).sort((a,b)=>{
+          const ta = Object.values(a[1]).reduce((s,v)=>s+v,0);
+          const tb = Object.values(b[1]).reduce((s,v)=>s+v,0);
+          return tb - ta;
+        }).map(([ticker, yearMap])=>{
+          const total = Object.values(yearMap).reduce((s,v)=>s+v,0);
+          return `<tr style="border-top:1px solid var(--border);">
+            <td style="padding:8px 10px;font-weight:500;">${ticker}</td>
+            ${years.map(y=>`<td style="padding:8px 10px;text-align:right;color:${yearMap[y]?'var(--green)':'var(--muted)'};">${yearMap[y]?fmt.format(yearMap[y]):'–'}</td>`).join('')}
+          </tr>`;
+        }).join('')}
+        <tr style="border-top:2px solid var(--border2);font-weight:600;">
+          <td style="padding:8px 10px;color:var(--green);">Total</td>
+          ${years.map(y=>{
+            const s = Object.values(byTickerYear).reduce((acc,m)=>acc+(m[y]||0),0);
+            return `<td style="padding:8px 10px;text-align:right;color:var(--green);">${s>0?fmt.format(s):'–'}</td>`;
+          }).join('')}
+        </tr>
+      </tbody>
+    </table></div>`;
+  }
+
+  // Estimated annuals from asset fields
+  if (annualDivs.length > 0) {
+    html += `<div style="font-size:12px;font-weight:600;color:var(--muted2);margin:16px 0 8px;text-transform:uppercase;letter-spacing:0.5px;">Estimés annuels (div/action × qté)</div>`;
     html += annualDivs.map(d=>`<div class="fee-item"><div style="flex:1"><div style="font-size:13px;font-weight:500;">${d.name}</div><div style="font-size:11px;color:var(--muted2);">Rendement ${d.yield}%</div></div><div style="font-weight:600;color:var(--green);">${fmt.format(d.annual)}/an</div></div>`).join('');
   }
-  if (divs.length) {
-    html += `<div style="font-size:12px;font-weight:600;color:var(--muted2);margin:12px 0 6px;text-transform:uppercase;letter-spacing:0.5px;">Historique reçu</div>`;
-    html += divs.slice(-5).reverse().map(d=>`<div class="fee-item"><div><div style="font-size:13px;font-weight:500;">${d.ticker||'?'}</div><div style="font-size:11px;color:var(--muted2);">${d.date||''}</div></div><div style="font-weight:600;color:var(--green);">${fmt.format(d.amount)}</div></div>`).join('');
-  }
+
   divEl.innerHTML = html;
 }
 
