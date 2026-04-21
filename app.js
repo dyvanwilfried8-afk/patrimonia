@@ -116,6 +116,7 @@ async function initApp() {
     initOverview();
     updateProjection();
     autoFillFiscalFromSalary();
+    renderDisconnectButtons();
     const now = new Date();
     safeSet('lastUpdate', now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }));
   } catch (err) {
@@ -195,40 +196,135 @@ function initOverview() {
 function renderCategoryCards(totalAssets, totalSav, total) {
   const el = document.getElementById('categoryCards');
   if (!el) return;
+
   const cats = [
-    { id:'stock',   label:'Actions / ETF',   icon:'\uD83D\uDCC8', color:'#3b82f6' },
-    { id:'crypto',  label:'Crypto',           icon:'\u20BF',       color:'#f59e0b' },
-    { id:'esop',    label:'ESOP / PER',       icon:'\uD83C\uDFE2', color:'#a78bfa' },
-    { id:'savings', label:'\u00C9pargne bancaire', icon:'\uD83C\uDFE6', color:'#22c55e' },
+    { id:'stock',   label:'Actions & Fonds', color:'#3b82f6', dot:'#3b82f6' },
+    { id:'crypto',  label:'Crypto',          color:'#f59e0b', dot:'#f59e0b' },
+    { id:'esop',    label:'ESOP / PER',      color:'#a78bfa', dot:'#a78bfa' },
+    { id:'savings', label:'Livrets',         color:'#22c55e', dot:'#22c55e' },
   ];
-  const rows = cats.map(cat => {
+
+  const catData = cats.map(cat => {
     let val;
     if (cat.id === 'savings') {
       val = totalSav;
     } else if (cat.id === 'stock') {
-      // Exclude EPA:AIR from CTO (sheets-cto) — already counted in ESOP via sheets-airbus
       val = assets
         .filter(a => (a.type || 'stock') === 'stock' && !(a.source === 'sheets-cto' && a.ticker === 'EPA:AIR'))
         .reduce((s, a) => s + assetValue(a), 0);
     } else {
       val = assets.filter(a => (a.type || 'stock') === cat.id).reduce((s, a) => s + assetValue(a), 0);
     }
-    if (val === 0) return '';
-    const pct = total > 0 ? ((val / total) * 100).toFixed(1) : 0;
+    // YTD performance for category
+    let ytdPnl = 0;
+    if (cat.id !== 'savings') {
+      const catAssets = cat.id === 'stock'
+        ? assets.filter(a => (a.type||'stock') === 'stock' && !(a.source === 'sheets-cto' && a.ticker === 'EPA:AIR'))
+        : assets.filter(a => (a.type||'stock') === cat.id);
+      ytdPnl = catAssets.reduce((s, a) => {
+        const v = assetValue(a);
+        const pctRaw = a.perfYtd;
+        if (!pctRaw || isNaN(pctRaw)) return s;
+        const pct = normalizePct(pctRaw) / 100;
+        return s + (v - v / (1 + pct));
+      }, 0);
+    }
+    return { ...cat, val, ytdPnl };
+  }).filter(d => d.val > 0);
+
+  if (!catData.length) {
+    el.innerHTML = '<div class="empty-state" style="padding:24px;"><div class="icon">📊</div><p>Ajoutez vos actifs via <b>Connexions</b></p></div>';
+    renderDonutChart([], total);
+    return;
+  }
+
+  el.innerHTML = catData.map(cat => {
+    const pct = total > 0 ? ((cat.val / total) * 100).toFixed(0) : 0;
+    const ytdColor = cat.ytdPnl >= 0 ? 'var(--green)' : 'var(--danger)';
+    const ytdSign  = cat.ytdPnl >= 0 ? '+' : '';
+    const ytdPct   = cat.val > 0 ? ((cat.ytdPnl / (cat.val - cat.ytdPnl)) * 100) : 0;
+    const ytdPctStr = Math.abs(ytdPct) > 0.01 ? ` ${ytdPct >= 0 ? '+' : ''}${ytdPct.toFixed(2)} %` : '';
     return `<div class="cat-card" onclick="navigate('${cat.id === 'savings' ? 'savings' : 'portfolio'}')">
-      <div class="cat-icon" style="background:${cat.color}22;">${cat.icon}</div>
-      <div class="cat-info"><div class="cat-name">${cat.label}</div><div class="cat-sub">${pct}% du patrimoine</div></div>
-      <div class="cat-right"><div class="cat-val">${fmt.format(val)}</div></div>
+      <div style="display:grid;grid-template-columns:1fr 90px 90px 110px;align-items:center;width:100%;padding:14px 20px;gap:8px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="width:10px;height:10px;border-radius:50%;background:${cat.dot};flex-shrink:0;"></div>
+          <span style="font-size:14px;font-weight:500;">${cat.label}</span>
+        </div>
+        <div style="text-align:right;font-size:13px;color:var(--muted2);">${pct} %</div>
+        <div style="text-align:right;font-size:14px;font-weight:600;">${fmt.format(cat.val)}</div>
+        <div style="text-align:right;">
+          ${cat.ytdPnl !== 0 ? `<div style="font-size:13px;font-weight:600;color:${ytdColor};">${ytdSign}${fmt.format(cat.ytdPnl)}</div><div style="font-size:11px;color:${ytdColor};">${ytdPctStr}</div>` : '<div style="font-size:12px;color:var(--muted2);">–</div>'}
+        </div>
+      </div>
     </div>`;
-  }).filter(Boolean);
-  el.innerHTML = rows.length ? rows.join('') : '<div class="empty-state"><div class="icon">\uD83D\uDCCA</div><p>Ajoutez vos actifs via <b>Connexions</b></p></div>';
+  }).join('');
+
+  // Update donut total label
+  const donutTotal = document.getElementById('donutTotal');
+  if (donutTotal) donutTotal.textContent = fmt.format(total);
+
+  renderDonutChart(catData, total);
 }
+
+let chartDonutInstance = null;
+
+function renderDonutChart(catData, total) {
+  const ctx = document.getElementById('chartDonutOverview');
+  if (!ctx) return;
+  if (chartDonutInstance) { chartDonutInstance.destroy(); chartDonutInstance = null; }
+  if (!catData.length) return;
+
+  const labels = catData.map(c => c.label);
+  const data   = catData.map(c => c.val);
+  const colors = catData.map(c => c.color);
+
+  chartDonutInstance = new Chart(ctx.getContext('2d'), {
+    type: 'doughnut',
+    data: { labels, datasets: [{ data, backgroundColor: colors, borderWidth: 0, hoverOffset: 6 }] },
+    options: {
+      cutout: '72%',
+      responsive: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${fmt.format(ctx.parsed)} (${total > 0 ? ((ctx.parsed / total)*100).toFixed(1) : 0}%)`
+          }
+        }
+      }
+    }
+  });
+
+  // Render legend
+  const legendEl = document.getElementById('donutLegend');
+  if (legendEl) {
+    legendEl.innerHTML = catData.map(c => {
+      const pct = total > 0 ? ((c.val / total)*100).toFixed(1) : 0;
+      return `<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <div style="width:8px;height:8px;border-radius:50%;background:${c.color};flex-shrink:0;"></div>
+          <span style="font-size:12px;color:var(--muted2);">${c.label}</span>
+        </div>
+        <div style="text-align:right;">
+          <span style="font-size:12px;font-weight:600;">${fmt.format(c.val)}</span>
+          <span style="font-size:11px;color:var(--muted2);margin-left:6px;">${pct}%</span>
+        </div>
+      </div>`;
+    }).join('');
+  }
+}
+
 
 function normalizePct(v) {
   // Normalize: ratio (e.g. 0.476) or already % (e.g. 47.6)
-  // Use sign-aware threshold: if |v| <= 2 → ratio, else already %
+  // Daily/weekly moves rarely exceed ±50%, so values between -2 and +2 are treated as ratios
+  // For larger values (like period perfs), values > 2 or < -2 are already in %
   if (v === undefined || v === null || isNaN(v)) return 0;
-  return Math.abs(v) <= 2 ? v * 100 : v;
+  // If absolute value is very small (< 2) → ratio format → multiply by 100
+  // But if value is like 5.0 or 49.0, it's already in %
+  // Heuristic: sheets mixing both — we treat |v| < 2 as ratio, else as %
+  // Exception: values like -1.18 are ratios (-118%) but also -0.07 = -7%
+  return Math.abs(v) < 2 ? v * 100 : v;
 }
 
 function renderPnlStats(totalAssets) {
@@ -1032,6 +1128,7 @@ async function connectSheets() {
     if (det) det.style.display='block';
     showToast(imported+' actifs import\u00E9s \u2713', '#22c55e');
     autoFillFiscalFromSalary();
+    renderDisconnectButtons();
 
   } catch(err) {
     showToast('Erreur : '+err.message, '#ef4444'); console.error(err);
@@ -1061,6 +1158,7 @@ async function connectBinance() {
     document.getElementById('binanceStatus').textContent='Connecté';
     document.getElementById('binanceStatus').className='badge badge-up';
     showToast('Binance importé ✓','#22c55e');
+    renderDisconnectButtons();
   } catch(err){ showToast('Erreur prix : '+err.message,'#ef4444'); }
 }
 
@@ -1077,9 +1175,76 @@ function connectCrypto() {
   document.getElementById('cryptoStatus').textContent='Connecté';
   document.getElementById('cryptoStatus').className='badge badge-up';
   showToast('Crypto.com importé ✓','#22c55e');
+  renderDisconnectButtons();
 }
 
 function connectTR() { showToast('Import PDF Trade Republic — en développement','#f59e0b'); }
+
+// ─── DÉCONNEXION PAR SOURCE ──────────────────────────────────────────────
+
+function disconnectSource(sourcePrefix, labelName) {
+  if (!confirm(`Supprimer tous les actifs de la source "${labelName}" ?\nLes autres données (épargne, salaire, crypto...) ne seront pas affectées.`)) return;
+  const before = assets.length;
+  assets = assets.filter(a => !a.source?.startsWith(sourcePrefix));
+  const removed = before - assets.length;
+  saveLocalData();
+  initOverview();
+  if (typeof renderPortfolio === 'function') renderPortfolio();
+  // Reset status badge
+  const statusMap = {
+    'sheets': 'sheetsStatus',
+    'binance': 'binanceStatus',
+    'crypto': 'cryptoStatus',
+    'tr': 'trStatus',
+    'file': 'fileImportStatus',
+  };
+  // Find which key matches
+  const key = Object.keys(statusMap).find(k => sourcePrefix.startsWith(k));
+  if (key) {
+    const el = document.getElementById(statusMap[key]);
+    if (el) { el.textContent = 'Non connecté'; el.className = 'badge badge-neutral'; }
+  }
+  // Hide detected badge for sheets
+  if (sourcePrefix === 'sheets') {
+    const det = document.getElementById('dashboardDetected');
+    if (det) det.style.display = 'none';
+  }
+  showToast(`${removed} actif(s) supprimé(s) — ${labelName} déconnecté`, '#f59e0b');
+  renderDisconnectButtons();
+}
+
+function renderDisconnectButtons() {
+  // For each source container, show/hide the disconnect button based on whether assets exist
+  const sources = [
+    { prefix: 'sheets', containerId: 'deleteContainer_sheets', label: 'Google Sheets' },
+    { prefix: 'binance', containerId: 'deleteContainer_binance', label: 'Binance' },
+    { prefix: 'crypto', containerId: 'deleteContainer_crypto', label: 'Crypto.com' },
+    { prefix: 'tr', containerId: 'deleteContainer_tr', label: 'Trade Republic' },
+  ];
+  sources.forEach(({ prefix, containerId, label }) => {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    const hasAssets = assets.some(a => a.source?.startsWith(prefix));
+    if (hasAssets) {
+      const count = assets.filter(a => a.source?.startsWith(prefix)).length;
+      el.innerHTML = `<button onclick="disconnectSource('${prefix}', '${label}')" 
+        style="margin-top:10px;width:100%;padding:8px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:8px;color:var(--danger);font-size:12px;font-weight:500;cursor:pointer;transition:all .15s;"
+        onmouseover="this.style.background='rgba(239,68,68,0.15)'" 
+        onmouseout="this.style.background='rgba(239,68,68,0.08)'">
+        🗑 Déconnecter ${label} <span style="opacity:0.6;">(${count} actif${count>1?'s':''})</span>
+      </button>`;
+      // Also update status badge to "Connecté"
+      const statusMap = { sheets: 'sheetsStatus', binance: 'binanceStatus', crypto: 'cryptoStatus', tr: 'trStatus' };
+      const statusEl = document.getElementById(statusMap[prefix]);
+      if (statusEl && statusEl.textContent === 'Non connecté') {
+        statusEl.textContent = 'Connecté'; statusEl.className = 'badge badge-up';
+      }
+    } else {
+      el.innerHTML = '';
+    }
+  });
+}
+
 
 // ─── PARAMÈTRES ──────────────────────────────────────────────────────────
 
