@@ -177,7 +177,10 @@ function getCssVar(name) {
 }
 
 function initOverview() {
-  const totalAssets = assets.reduce((s, a) => s + assetValue(a), 0);
+  // Exclude EPA:AIR from sheets-cto to avoid double-counting with sheets-airbus ESOP assets
+  const totalAssets = assets
+    .filter(a => !(a.source === 'sheets-cto' && a.ticker === 'EPA:AIR'))
+    .reduce((s, a) => s + assetValue(a), 0);
   const totalSav    = savings.reduce((s, sv) => s + (sv.balance || 0), 0);
   const total       = showSavingsInTotal ? totalAssets + totalSav : totalAssets;
   safeSet('kpi-total', fmt.format(total));
@@ -199,8 +202,17 @@ function renderCategoryCards(totalAssets, totalSav, total) {
     { id:'savings', label:'\u00C9pargne bancaire', icon:'\uD83C\uDFE6', color:'#22c55e' },
   ];
   const rows = cats.map(cat => {
-    const val = cat.id === 'savings' ? totalSav
-      : assets.filter(a => (a.type || 'stock') === cat.id).reduce((s, a) => s + assetValue(a), 0);
+    let val;
+    if (cat.id === 'savings') {
+      val = totalSav;
+    } else if (cat.id === 'stock') {
+      // Exclude EPA:AIR from CTO (sheets-cto) — already counted in ESOP via sheets-airbus
+      val = assets
+        .filter(a => (a.type || 'stock') === 'stock' && !(a.source === 'sheets-cto' && a.ticker === 'EPA:AIR'))
+        .reduce((s, a) => s + assetValue(a), 0);
+    } else {
+      val = assets.filter(a => (a.type || 'stock') === cat.id).reduce((s, a) => s + assetValue(a), 0);
+    }
     if (val === 0) return '';
     const pct = total > 0 ? ((val / total) * 100).toFixed(1) : 0;
     return `<div class="cat-card" onclick="navigate('${cat.id === 'savings' ? 'savings' : 'portfolio'}')">
@@ -220,7 +232,10 @@ function normalizePct(v) {
 }
 
 function renderPnlStats(totalAssets) {
-  const invested = assets.reduce((s, a) => s + assetCost(a), 0);
+  // Exclude EPA:AIR from sheets-cto (same double-count exclusion as totalAssets)
+  const invested = assets
+    .filter(a => !(a.source === 'sheets-cto' && a.ticker === 'EPA:AIR'))
+    .reduce((s, a) => s + assetCost(a), 0);
   const pnl = totalAssets - invested;
   const pnlPct = invested > 0 ? ((pnl / invested) * 100).toFixed(2) : 0;
   const color = pnl >= 0 ? '#22c55e' : '#ef4444';
@@ -417,9 +432,9 @@ function renderPortfolio() {
   if (!tbody) return;
   const srcF = document.getElementById('filterSource')?.value || 'all';
   const typF = document.getElementById('filterType')?.value   || 'all';
-  // Exclude EPA:AIR from CTO tab — it's already counted in ESOP/AIRBUS tab
-  let filtered = assets.filter(a => (srcF === 'all' || a.source === srcF) && (typF === 'all' || a.type === typF))
-    .filter(a => !(a.source === 'sheets-cto' && a.ticker === 'EPA:AIR'));
+  // EPA:AIR (sheets-cto) is shown here under Actions/ETF; ESOP PEG (sheets-airbus) under ESOP/PER
+  // Double-counting is avoided in initOverview/renderCategoryCards, not here
+  let filtered = assets.filter(a => (srcF === 'all' || a.source === srcF) && (typF === 'all' || a.type === typF));
   filtered.sort((a, b) => {
     const va = assetValue(a), vb = assetValue(b);
     const ca = assetCost(a),  cb = assetCost(b);
@@ -449,9 +464,10 @@ function renderPortfolio() {
     const val   = assetValue(a);
     const cost  = assetCost(a);
     const pnl   = val - cost;
-    const pnlPct = a.perfTotal && a.perfTotal !== 0
-      ? normalizePct(a.perfTotal)
-      : cost > 0 ? (pnl / cost) * 100 : 0;
+    // Always compute total P&L% from actual val/cost — don't trust perfTotal for "Total" column
+    // perfTotal from sheet can be wrong (e.g. Booking -118% due to ratio format mismatch)
+    const pnlPct = cost > 0 ? (pnl / cost) * 100
+      : (a.perfTotal && a.perfTotal !== 0 ? normalizePct(a.perfTotal) : 0);
     const pnlP   = Math.abs(pnlPct) > 0.01 ? pnlPct.toFixed(1) : '\u2013';
     const poids  = totalVal > 0 ? ((val / totalVal) * 100).toFixed(1) : '\u2013';
     const pc     = pnl >= 0 ? 'perf-pos' : 'perf-neg';
