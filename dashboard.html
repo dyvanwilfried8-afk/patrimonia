@@ -1051,7 +1051,12 @@
             <div style="padding:18px 20px 12px;display:flex;align-items:center;justify-content:space-between;">
               <div style="font-size:14px;font-weight:600;">Actifs</div>
               <div style="display:flex;gap:8px;align-items:center;">
-                <button id="btnToggleSavings" class="refresh-btn" onclick="toggleSavingsFilter()" style="font-size:11px;padding:5px 10px;">🏦 Épargne</button>
+                <select id="patrimoineModeSelect" onchange="setPatrimoineMode(this.value)"
+                  style="background:var(--surface2);border:1px solid var(--border2);border-radius:8px;color:var(--text);font-size:11px;font-weight:500;padding:5px 10px;cursor:pointer;outline:none;font-family:inherit;">
+                  <option value="brut">Brut</option>
+                  <option value="net">Net</option>
+                  <option value="sans-epargne">Sans épargne</option>
+                </select>
                 <button class="refresh-btn" onclick="refreshData()" style="font-size:11px;padding:5px 10px;">↻</button>
               </div>
             </div>
@@ -2277,15 +2282,21 @@
         </div>
         <div>
           <label class="field-label">Catégorie</label>
-          <select class="field-input" id="expCategory">
+          <select class="field-input" id="expCategory" onchange="toggleCreditField()">
             <option value="logement">🏠 Logement</option>
             <option value="transport">🚗 Transport</option>
             <option value="assurance">🛡️ Assurance</option>
             <option value="abonnement">📱 Abonnements</option>
             <option value="alimentation">🛒 Alimentation</option>
+            <option value="credit">💳 Crédit / Prêt</option>
             <option value="autre">📦 Autre</option>
           </select>
         </div>
+      </div>
+      <!-- Capital restant dû — visible uniquement si catégorie = crédit -->
+      <div id="creditCapitalField" style="display:none;" class="field-group">
+        <label class="field-label">Capital restant dû (€) <span style="color:var(--muted2);font-size:10px;">— utilisé pour le patrimoine net</span></label>
+        <input class="field-input" type="number" id="expRemainingCapital" placeholder="0">
       </div>
       <div style="margin-top:20px; display:flex; gap:8px; justify-content:flex-end;">
         <button class="btn btn-ghost" onclick="closeModal('addExpense')">Annuler</button>
