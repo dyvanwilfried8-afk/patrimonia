@@ -184,6 +184,14 @@ function initOverview() {
     .reduce((s, a) => s + assetValue(a), 0);
   const totalSav    = savings.reduce((s, sv) => s + (sv.balance || 0), 0);
   const total       = showSavingsInTotal ? totalAssets + totalSav : totalAssets;
+
+  // Update date label
+  const dateLabel = document.getElementById('overviewDateLabel');
+  if (dateLabel) {
+    const today = new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
+    const hasHisto = loadHistoPoints().length > 1;
+    dateLabel.innerHTML = `Patrimoine brut <span style="color:var(--muted2);font-size:11px;margin-left:6px;">${today}</span>${hasHisto ? ' <span style="font-size:10px;color:var(--green);margin-left:4px;">● Historique réel</span>' : ''}`;
+  }
   safeSet('kpi-total', fmt.format(total));
   renderCategoryCards(totalAssets, totalSav, total);
   renderPnlStats(totalAssets);
@@ -423,41 +431,92 @@ function toggleSavingsFilter() {
 
 let currentHistoPeriod = 'YTD';
 
+// Load stored history points
+function loadHistoPoints() {
+  try {
+    return JSON.parse(localStorage.getItem('patrimonia_histo') || '[]');
+  } catch(e) { return []; }
+}
+
+// Filter histo points by period
+function filterHistoByPeriod(points, period) {
+  if (!points.length) return points;
+  const now = new Date();
+  let cutoff = new Date(now);
+  switch(period) {
+    case '1J':  cutoff.setDate(now.getDate() - 1); break;
+    case '7J':  cutoff.setDate(now.getDate() - 7); break;
+    case '1M':  cutoff.setMonth(now.getMonth() - 1); break;
+    case '3M':  cutoff.setMonth(now.getMonth() - 3); break;
+    case 'YTD': cutoff = new Date(now.getFullYear(), 0, 1); break;
+    case '1A':  cutoff.setFullYear(now.getFullYear() - 1); break;
+    case 'TOUT': return points;
+    default:    cutoff = new Date(now.getFullYear(), 0, 1);
+  }
+  return points.filter(h => new Date(h.date) >= cutoff);
+}
+
 function renderHistoChart(total) {
   const ctx = document.getElementById('chartHistorique');
   if (!ctx) return;
   if (chartHistoInstance) chartHistoInstance.destroy();
 
   const now = new Date();
-  const labels = [], data = [];
+  const histoRaw = loadHistoPoints();
 
-  // Build realistic historical curve using per-asset period performances
-  // We reconstruct the curve: current value - period gain = starting value, then interpolate
-  const buildCurve = (pts, monthsBack, perfField) => {
+  // ── Build curve from REAL historical data if available ──
+  const buildRealCurve = (period) => {
+    const filtered = filterHistoByPeriod(histoRaw, period);
+    if (filtered.length < 2) return null;
+
+    const labels = filtered.map(h => {
+      const d = new Date(h.date);
+      return d.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
+    });
+    const data = filtered.map(h => Math.round(h.val));
+
+    // Append current total as last point if it differs from last stored point
+    const lastStored = data[data.length - 1];
+    if (Math.abs(lastStored - total) > 50) {
+      labels.push(now.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' }));
+      data.push(Math.round(total));
+    }
+    return { labels, data };
+  };
+
+  // ── Fallback: estimate curve from period performance fields ──
+  const buildEstimCurve = (pts, monthsBack, perfField) => {
     const labels = [], data = [];
-    // Compute total value going back by period, using per-asset perfs
-    const totalPeriodPnl = assets.reduce((s, a) => {
-      const val = assetValue(a);
-      const pctRaw = a[perfField];
-      if (!pctRaw || isNaN(pctRaw)) return s;
-      const pct = normalizePct(pctRaw) / 100;
-      return s + (val - val / (1 + pct));
-    }, 0);
-    const savTotal = showSavingsInTotal ? savings.reduce((s,sv)=>s+(sv.balance||0), 0) : 0;
-    const startVal = total - totalPeriodPnl;
+    const assetsWithPerf = assets.filter(a => {
+      const v = a[perfField];
+      return v !== undefined && v !== null && !isNaN(v) && v !== 0;
+    });
+    let totalPeriodPnl;
+    if (assetsWithPerf.length > 0) {
+      totalPeriodPnl = assetsWithPerf.reduce((s, a) => {
+        const val = assetValue(a);
+        const pct = normalizePct(a[perfField]) / 100;
+        return s + (val - val / (1 + pct));
+      }, 0);
+    } else {
+      const totalCost = assets
+        .filter(a => !(a.source === 'sheets-cto' && a.ticker === 'EPA:AIR'))
+        .reduce((s, a) => s + assetCost(a), 0);
+      totalPeriodPnl = total - totalCost - (showSavingsInTotal ? savings.reduce((s,sv)=>s+(sv.balance||0),0) : 0);
+    }
+    const startVal = Math.max(0, total - totalPeriodPnl);
 
     for (let i = pts; i >= 0; i--) {
       const d = new Date(now);
+      const daysBack = Math.round(i * (monthsBack * 30) / pts);
+      d.setDate(d.getDate() - daysBack);
       if (monthsBack <= 1) {
-        d.setDate(d.getDate() - Math.round(i * (monthsBack * 30) / pts));
         labels.push(d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }));
       } else {
-        d.setDate(d.getDate() - Math.round(i * (monthsBack * 30) / pts));
         labels.push(d.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' }));
       }
-      // Smooth interpolation with slight curve
       const t = 1 - i / pts;
-      const eased = t < 0.5 ? 2*t*t : -1+(4-2*t)*t; // ease in-out
+      const eased = t < 0.5 ? 2*t*t : -1+(4-2*t)*t;
       data.push(Math.round(startVal + (total - startVal) * eased));
     }
     data[data.length - 1] = total;
@@ -465,22 +524,36 @@ function renderHistoChart(total) {
   };
 
   let curve;
-  switch(currentHistoPeriod) {
-    case '1J':   curve = buildCurve(24, 1/30, 'perf1d');  break;
-    case '7J':   curve = buildCurve(7,  7/30, 'perfW');   break;
-    case '1M':   curve = buildCurve(30, 1,    'perfM');   break;
-    case '3M':   curve = buildCurve(12, 3,    'perfM');   break;
-    case 'YTD': {
-      // months since Jan 1
-      const monthsSinceJan = now.getMonth() + now.getDate()/30;
-      curve = buildCurve(Math.max(6, Math.round(monthsSinceJan * 4)), monthsSinceJan, 'perfYtd');
-      break;
+  // Try real data first for monthly/long periods
+  const realCurve = buildRealCurve(currentHistoPeriod);
+
+  if (realCurve && ['YTD','1A','TOUT','3M','1M'].includes(currentHistoPeriod)) {
+    curve = realCurve;
+  } else {
+    switch(currentHistoPeriod) {
+      case '1J':   curve = buildEstimCurve(24, 1/30, 'perf1d');  break;
+      case '7J':   curve = buildEstimCurve(7,  7/30, 'perfW');   break;
+      case '1M':   curve = realCurve || buildEstimCurve(30, 1, 'perfM');   break;
+      case '3M':   curve = realCurve || buildEstimCurve(12, 3, 'perfM');   break;
+      case 'YTD': {
+        const monthsSinceJan = now.getMonth() + now.getDate()/30;
+        curve = realCurve || buildEstimCurve(Math.max(6, Math.round(monthsSinceJan * 4)), monthsSinceJan, 'perfYtd');
+        break;
+      }
+      case '1A':   curve = realCurve || buildEstimCurve(12, 12, 'perfYtd');  break;
+      case 'TOUT': curve = realCurve || buildEstimCurve(24, 24, 'perfYtd');  break;
+      default:     curve = realCurve || buildEstimCurve(12, 12, 'perfYtd');  break;
     }
-    case '1A':   curve = buildCurve(12, 12, 'perfYtd');  break;
-    default:     curve = buildCurve(12, 12, 'perfYtd');  break;
   }
 
-  // Determine chart color based on gain/loss
+  // Source indicator — show badge if using real data
+  const dateLabel = document.getElementById('overviewDateLabel');
+  if (dateLabel) {
+    const usingReal = realCurve && ['YTD','1A','TOUT','3M','1M'].includes(currentHistoPeriod);
+    dateLabel.innerHTML = `Patrimoine brut ${usingReal ? '<span style="font-size:10px;color:var(--green);margin-left:6px;">● Historique réel</span>' : ''}`;
+  }
+
+  // Determine chart color
   const isUp = curve.data[curve.data.length-1] >= curve.data[0];
   const lineColor = isUp ? '#3b82f6' : '#ef4444';
   const fillColor = isUp ? 'rgba(59,130,246,0.08)' : 'rgba(239,68,68,0.06)';
@@ -494,8 +567,21 @@ function renderHistoChart(total) {
         callbacks: { label: ctx => fmt.format(ctx.parsed.y) }
       }},
       scales: {
-        y: { display: false },
-        x: { grid: { display: false }, ticks: { color: getComputedStyle(document.documentElement).getPropertyValue('--muted2')||'#52525b', font: { size: 10 }, maxTicksLimit: 6 } }
+        y: {
+          display: true,
+          position: 'left',
+          grid: { color: (getComputedStyle(document.documentElement).getPropertyValue('--border')||'rgba(255,255,255,0.06)') },
+          ticks: {
+            color: getComputedStyle(document.documentElement).getPropertyValue('--muted2')||'#71717a',
+            font: { size: 10 },
+            maxTicksLimit: 5,
+            callback: v => {
+              if (v >= 1000) return (v/1000).toFixed(v%1000===0?0:1) + ' k€';
+              return v + ' €';
+            }
+          }
+        },
+        x: { grid: { display: false }, ticks: { color: getComputedStyle(document.documentElement).getPropertyValue('--muted2')||'#52525b', font: { size: 10 }, maxTicksLimit: 8 } }
       }
     }
   });
@@ -505,9 +591,11 @@ function setHistoPeriod(period, btn) {
   currentHistoPeriod = period;
   document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active', 'active-default'));
   btn.classList.add('active');
-  const totalAssets = assets.reduce((s, a) => s + assetValue(a), 0);
-  const totalSav    = savings.reduce((s, sv) => s + (sv.balance || 0), 0);
-  const total       = showSavingsInTotal ? totalAssets + totalSav : totalAssets;
+  const totalAssets = assets
+    .filter(a => !(a.source === 'sheets-cto' && a.ticker === 'EPA:AIR'))
+    .reduce((s, a) => s + assetValue(a), 0);
+  const totalSav = savings.reduce((s, sv) => s + (sv.balance || 0), 0);
+  const total    = showSavingsInTotal ? totalAssets + totalSav : totalAssets;
   renderHistoChart(total);
 }
 
@@ -1104,6 +1192,79 @@ async function connectSheets() {
       });
     }
 
+    // ─── HISTORIQUE MENSUEL ──────────────────────────────────────────────
+    // Lit "Suivi patrimoine" (vue globale) + onglets Suivi CTO/Airbus/Crypto
+    // Structure attendue : col A=Date, col B=Investi, col C=Valeur Totale
+
+    const parseHistoRow = (row) => {
+      // Date : peut être un serial Google Sheets (nombre) ou une chaîne DD/MM/YYYY
+      const rawDate = t(row[0]);
+      const rawVal  = p(row[2]);  // col C = Valeur Totale
+      const rawInv  = p(row[1]);  // col B = Investi
+      if (!rawDate || rawDate.toUpperCase() === 'DATE' || rawDate.toUpperCase() === 'TOTAL') return null;
+      if (rawVal <= 0 && rawInv <= 0) return null;
+
+      let dateObj = null;
+      const serial = parseFloat(rawDate.replace(',', '.'));
+      if (!isNaN(serial) && serial > 40000) {
+        // Google Sheets date serial
+        dateObj = new Date(Math.round((serial - 25569) * 86400 * 1000));
+      } else {
+        // DD/MM/YYYY or YYYY-MM-DD
+        const parts = rawDate.split(/[\/\-]/);
+        if (parts.length === 3) {
+          if (parts[0].length === 4) dateObj = new Date(parseInt(parts[0]), parseInt(parts[1])-1, parseInt(parts[2]));
+          else dateObj = new Date(parseInt(parts[2]), parseInt(parts[1])-1, parseInt(parts[0]));
+        }
+      }
+      if (!dateObj || isNaN(dateObj.getTime())) return null;
+      return { date: dateObj, val: rawVal, inv: rawInv };
+    };
+
+    // Consolidate history from multiple Suivi tabs — each tab contributes its own category
+    // We aggregate by month to build a total patrimoine curve
+    const histoByMonth = {}; // key: "YYYY-MM" → { val, inv, sources: Set }
+
+    const addToHisto = (rows, tabName) => {
+      if (!rows) return;
+      rows.slice(1).forEach(row => {
+        const h = parseHistoRow(row);
+        if (!h) return;
+        const key = `${h.date.getFullYear()}-${String(h.date.getMonth()+1).padStart(2,'0')}`;
+        if (!histoByMonth[key]) histoByMonth[key] = { val: 0, inv: 0, sources: new Set(), date: h.date };
+        histoByMonth[key].val += h.val;
+        histoByMonth[key].inv += h.inv;
+        histoByMonth[key].sources.add(tabName);
+      });
+    };
+
+    // Onglet "Suivi patrimoine" = tableau statique par catégorie (CTO, AIRBUS, Crypto...) — pas une série temporelle
+    // On utilise les onglets de suivi mensuel pour construire la courbe historique
+    // Onglets prioritaires : "Suivi CTO 2026", "Suivi Airbus", "Suivi Crypto", "Epargne"
+    const suiviCtoRows    = await fetchTab('Suivi CTO 2026');
+    const suiviAirbusRows = await fetchTab('Suivi Airbus');
+    const suiviCryptoRows = await fetchTab('Suivi Crypto');
+    const suiviEpargne    = await fetchTab('Epargne');
+    addToHisto(suiviCtoRows,    'CTO');
+    addToHisto(suiviAirbusRows, 'Airbus');
+    addToHisto(suiviCryptoRows, 'Crypto');
+    addToHisto(suiviEpargne,    'Epargne');
+
+    // Sort and store history
+    const histoPoints = Object.entries(histoByMonth)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, v]) => ({ key, date: v.date, val: v.val, inv: v.inv }));
+
+    if (histoPoints.length > 1) {
+      localStorage.setItem('patrimonia_histo', JSON.stringify(
+        histoPoints.map(h => ({
+          date: h.date.toISOString().substring(0, 10),
+          val:  h.val,
+          inv:  h.inv,
+        }))
+      ));
+    }
+
     // DIVIDENDES — "Suivi CTO 2026" col I(8)=Date J(9)=Société K(10)=Montant L(11)=Div/action
     const suiviRows = await fetchTab('Suivi CTO 2026');
     if (suiviRows) {
@@ -1204,10 +1365,12 @@ function disconnectSource(sourcePrefix, labelName) {
     const el = document.getElementById(statusMap[key]);
     if (el) { el.textContent = 'Non connecté'; el.className = 'badge badge-neutral'; }
   }
-  // Hide detected badge for sheets
+  // Hide detected badge for sheets + clear historical data
   if (sourcePrefix === 'sheets') {
     const det = document.getElementById('dashboardDetected');
     if (det) det.style.display = 'none';
+    localStorage.removeItem('patrimonia_histo');
+    localStorage.removeItem('patrimonia_dividends');
   }
   showToast(`${removed} actif(s) supprimé(s) — ${labelName} déconnecté`, '#f59e0b');
   renderDisconnectButtons();
@@ -1546,7 +1709,7 @@ async function confirmDeleteAccount() {
     const { error: signInErr } = await sb.auth.signInWithPassword({ email, password });
     if (signInErr) throw new Error('Mot de passe incorrect.');
     // 2. Effacer les données locales
-    ['patrimonia_assets','patrimonia_savings','patrimonia_expenses','patrimonia_salary','patrimonia_settings','patrimonia_dividends','patrimonia_theme'].forEach(k=>localStorage.removeItem(k));
+    ['patrimonia_assets','patrimonia_savings','patrimonia_expenses','patrimonia_salary','patrimonia_settings','patrimonia_dividends','patrimonia_histo','patrimonia_theme'].forEach(k=>localStorage.removeItem(k));
     // 3. Supprimer le compte Supabase
     const { error: delErr } = await sb.auth.admin?.deleteUser(session.user.id)
       .catch(()=>({error:null})) || {};
