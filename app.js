@@ -112,8 +112,26 @@ async function initApp() {
     safeSet('settingsEmail', email);
     const av = document.getElementById('userAvatar');
     if (av) av.textContent = email.charAt(0).toUpperCase();
+
+    // 1. Charger localStorage immédiatement (affichage rapide)
     loadLocalData();
     initOverview();
+
+    // 2. Charger depuis Supabase (données cloud — peut override localStorage)
+    const fromCloud = await loadFromSupabase();
+    if (fromCloud) {
+      // Re-render avec les données cloud
+      initOverview();
+      renderDisconnectButtons();
+      if (typeof renderPortfolio === 'function') renderPortfolio();
+      if (typeof renderSavings   === 'function') renderSavings();
+      if (typeof renderSalary    === 'function') renderSalary();
+      showToast('Données synchronisées ✓', '#22c55e');
+    } else if (assets.length > 0) {
+      // Pas de données cloud mais données locales → les uploader
+      saveToSupabase();
+    }
+
     updateProjection();
     autoFillFiscalFromSalary();
     renderDisconnectButtons();
@@ -152,13 +170,68 @@ function loadLocalData() {
   } catch(e) { console.warn('Erreur données locales:', e); }
 }
 
+let _saveDebounceTimer = null;
+
 function saveLocalData() {
+  // 1. Sauvegarde immédiate en localStorage (cache offline)
   localStorage.setItem('patrimonia_assets',   JSON.stringify(assets));
   localStorage.setItem('patrimonia_savings',  JSON.stringify(savings));
   localStorage.setItem('patrimonia_expenses', JSON.stringify(expenses));
   localStorage.setItem('patrimonia_salary',   JSON.stringify(salaryData));
   localStorage.setItem('patrimonia_settings', JSON.stringify(settings));
+  // 2. Sync Supabase avec debounce 1.5s pour éviter les appels répétés
+  clearTimeout(_saveDebounceTimer);
+  _saveDebounceTimer = setTimeout(() => saveToSupabase(), 1500);
 }
+
+async function saveToSupabase() {
+  if (!currentUser) return;
+  try {
+    const histo = (() => { try { return JSON.parse(localStorage.getItem('patrimonia_histo')||'[]'); } catch(e){ return []; } })();
+    const divs  = (() => { try { return JSON.parse(localStorage.getItem('patrimonia_dividends')||'[]'); } catch(e){ return []; } })();
+    const { error } = await sb
+      .from('user_data')
+      .upsert({
+        user_id:    currentUser,
+        assets:     assets,
+        savings:    savings,
+        expenses:   expenses,
+        salary:     salaryData,
+        settings:   settings,
+        histo:      histo,
+        dividends:  divs,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' });
+    if (error) console.warn('Supabase save error:', error.message);
+    else {
+      // Show subtle sync indicator
+      const ind = document.getElementById('syncIndicator');
+      if (ind) { ind.style.opacity = '1'; setTimeout(() => ind.style.opacity = '0', 2000); }
+    }
+  } catch(e) { console.warn('Supabase save failed:', e.message); }
+}
+
+async function loadFromSupabase() {
+  if (!currentUser) return false;
+  try {
+    const { data, error } = await sb
+      .from('user_data')
+      .select('*')
+      .eq('user_id', currentUser)
+      .single();
+    if (error || !data) return false;
+
+    if (Array.isArray(data.assets))   { assets    = data.assets;   localStorage.setItem('patrimonia_assets',   JSON.stringify(assets)); }
+    if (Array.isArray(data.savings))  { savings   = data.savings;  localStorage.setItem('patrimonia_savings',  JSON.stringify(savings)); }
+    if (Array.isArray(data.expenses)) { expenses  = data.expenses; localStorage.setItem('patrimonia_expenses', JSON.stringify(expenses)); }
+    if (data.salary)   { salaryData = data.salary;   localStorage.setItem('patrimonia_salary',   JSON.stringify(salaryData)); }
+    if (data.settings) { settings   = data.settings; localStorage.setItem('patrimonia_settings', JSON.stringify(settings)); }
+    if (Array.isArray(data.histo)     && data.histo.length     > 0) localStorage.setItem('patrimonia_histo',     JSON.stringify(data.histo));
+    if (Array.isArray(data.dividends) && data.dividends.length > 0) localStorage.setItem('patrimonia_dividends', JSON.stringify(data.dividends));
+    return true;
+  } catch(e) { console.warn('Supabase load failed:', e.message); return false; }
+}
+
 
 // ─── OVERVIEW ───────────────────────────────────────────────────────────
 
@@ -1739,9 +1812,16 @@ function handleImport(event) {
 }
 
 function clearData() {
-  if(!confirm('Réinitialiser ? Action irréversible.')) return;
-  ['patrimonia_assets','patrimonia_savings','patrimonia_expenses','patrimonia_salary','patrimonia_settings'].forEach(k=>localStorage.removeItem(k));
-  loadLocalData(); initOverview(); showToast('Données réinitialisées','#f59e0b');
+  if(!confirm('Réinitialiser toutes les données ? Action irréversible.')) return;
+  assets = []; savings = []; expenses = []; salaryData = {}; settings = { currency:'EUR', exposureThreshold:20 };
+  ['patrimonia_assets','patrimonia_savings','patrimonia_expenses','patrimonia_salary','patrimonia_settings','patrimonia_histo','patrimonia_dividends'].forEach(k=>localStorage.removeItem(k));
+  // Sync la réinitialisation vers Supabase
+  saveToSupabase();
+  initOverview(); renderDisconnectButtons();
+  if (typeof renderPortfolio === 'function') renderPortfolio();
+  if (typeof renderSavings   === 'function') renderSavings();
+  if (typeof renderSalary    === 'function') renderSalary();
+  showToast('Données réinitialisées','#f59e0b');
 }
 
 // ─── SUPPRESSION COMPTE ──────────────────────────────────────────────────
