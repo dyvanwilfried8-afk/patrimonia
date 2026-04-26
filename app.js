@@ -323,17 +323,20 @@ function renderCategoryCards(totalAssets, totalSav, total) {
   ];
 
   const catData = cats.map(cat => {
-    let val;
+    let val, inv;
     if (cat.id === 'savings') {
       val = totalSav;
+      inv = totalSav; // savings have no gain/loss
     } else if (cat.id === 'stock') {
-      val = assets
-        .filter(a => (a.type || 'stock') === 'stock' && !(a.source === 'sheets-cto' && a.ticker === 'EPA:AIR'))
-        .reduce((s, a) => s + assetValue(a), 0);
+      const a = assets.filter(a => (a.type || 'stock') === 'stock' && !(a.source === 'sheets-cto' && a.ticker === 'EPA:AIR'));
+      val = a.reduce((s, x) => s + assetValue(x), 0);
+      inv = a.reduce((s, x) => s + assetCost(x), 0);
     } else {
-      val = assets.filter(a => (a.type || 'stock') === cat.id).reduce((s, a) => s + assetValue(a), 0);
+      const a = assets.filter(x => (x.type || 'stock') === cat.id);
+      val = a.reduce((s, x) => s + assetValue(x), 0);
+      inv = a.reduce((s, x) => s + assetCost(x), 0);
     }
-    // YTD performance for category
+    // YTD P&L from perfYtd field
     let ytdPnl = 0;
     if (cat.id !== 'savings') {
       const catAssets = cat.id === 'stock'
@@ -347,8 +350,10 @@ function renderCategoryCards(totalAssets, totalSav, total) {
         return s + (v - v / (1 + pct));
       }, 0);
     }
-    return { ...cat, val, ytdPnl };
-  }).filter(d => d.val > 0);
+    const pnl  = val - inv;
+    const perf = inv > 0 ? (pnl / inv) * 100 : 0;
+    return { ...cat, val, inv, pnl, perf, ytdPnl };
+  }).filter(d => d.val > 0 || d.inv > 0);
 
   if (!catData.length) {
     el.innerHTML = '<div class="empty-state" style="padding:24px;"><div class="icon">📊</div><p>Ajoutez vos actifs via <b>Connexions</b></p></div>';
@@ -356,26 +361,61 @@ function renderCategoryCards(totalAssets, totalSav, total) {
     return;
   }
 
-  el.innerHTML = catData.map(cat => {
-    const pct = total > 0 ? ((cat.val / total) * 100).toFixed(0) : 0;
-    const ytdColor = cat.ytdPnl >= 0 ? 'var(--green)' : 'var(--danger)';
-    const ytdSign  = cat.ytdPnl >= 0 ? '+' : '';
-    const ytdPct   = cat.val > 0 ? ((cat.ytdPnl / (cat.val - cat.ytdPnl)) * 100) : 0;
-    const ytdPctStr = Math.abs(ytdPct) > 0.01 ? ` ${ytdPct >= 0 ? '+' : ''}${ytdPct.toFixed(2)} %` : '';
-    return `<div class="cat-card" onclick="navigate('${cat.id === 'savings' ? 'savings' : 'portfolio'}')">
-      <div style="display:grid;grid-template-columns:1fr 90px 90px 110px;align-items:center;width:100%;padding:14px 20px;gap:8px;">
-        <div style="display:flex;align-items:center;gap:10px;">
-          <div style="width:10px;height:10px;border-radius:50%;background:${cat.dot};flex-shrink:0;"></div>
-          <span style="font-size:14px;font-weight:500;">${cat.label}</span>
-        </div>
-        <div style="text-align:right;font-size:13px;color:var(--muted2);">${pct} %</div>
-        <div style="text-align:right;font-size:14px;font-weight:600;">${fmt.format(cat.val)}</div>
-        <div style="text-align:right;">
-          ${cat.ytdPnl !== 0 ? `<div style="font-size:13px;font-weight:600;color:${ytdColor};">${ytdSign}${fmt.format(cat.ytdPnl)}</div><div style="font-size:11px;color:${ytdColor};">${ytdPctStr}</div>` : '<div style="font-size:12px;color:var(--muted2);">–</div>'}
-        </div>
+  // Totals row
+  const totalInv  = catData.reduce((s, c) => s + (c.id === 'savings' ? 0 : c.inv), 0);
+  const totalVal2 = catData.reduce((s, c) => s + c.val, 0);
+  const totalPnl  = totalVal2 - totalInv;
+  const totalPerf = totalInv > 0 ? (totalPnl / totalInv) * 100 : 0;
+
+  const perfBar = (perf) => {
+    const capped = Math.min(Math.max(perf, -100), 100);
+    const color  = perf >= 0 ? '#22c55e' : '#ef4444';
+    const bg     = perf >= 0 ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)';
+    const w      = Math.abs(capped);
+    return `<div style="display:flex;align-items:center;gap:8px;justify-content:flex-end;">
+      <div style="width:60px;height:6px;background:var(--surface2);border-radius:3px;overflow:hidden;flex-shrink:0;">
+        <div style="width:${w}%;height:100%;background:${color};border-radius:3px;"></div>
       </div>
+      <span style="font-size:13px;font-weight:600;color:${color};min-width:52px;text-align:right;">${perf >= 0 ? '+' : ''}${perf.toFixed(2)}%</span>
     </div>`;
-  }).join('');
+  };
+
+  el.innerHTML = `
+    <!-- Header -->
+    <div style="display:grid;grid-template-columns:1fr 100px 100px 110px 150px;padding:8px 20px;background:var(--surface2);border-bottom:1px solid var(--border);gap:8px;">
+      <div style="font-size:10px;font-weight:600;color:var(--muted2);text-transform:uppercase;letter-spacing:0.5px;">Actif</div>
+      <div style="font-size:10px;font-weight:600;color:var(--muted2);text-transform:uppercase;letter-spacing:0.5px;text-align:right;">Investi</div>
+      <div style="font-size:10px;font-weight:600;color:var(--muted2);text-transform:uppercase;letter-spacing:0.5px;text-align:right;">Val. Totale</div>
+      <div style="font-size:10px;font-weight:600;color:var(--muted2);text-transform:uppercase;letter-spacing:0.5px;text-align:right;">Plus-Value</div>
+      <div style="font-size:10px;font-weight:600;color:var(--muted2);text-transform:uppercase;letter-spacing:0.5px;text-align:right;">Performance</div>
+    </div>
+
+    ${catData.map(cat => {
+      const pnlColor  = cat.pnl  >= 0 ? 'var(--green)' : 'var(--danger)';
+      const isNonInv  = cat.id === 'savings';
+      return `<div class="cat-card" onclick="navigate('${cat.id === 'savings' ? 'savings' : 'portfolio'}')">
+        <div style="display:grid;grid-template-columns:1fr 100px 100px 110px 150px;align-items:center;width:100%;padding:14px 20px;gap:8px;">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div style="width:10px;height:10px;border-radius:50%;background:${cat.dot};flex-shrink:0;"></div>
+            <span style="font-size:14px;font-weight:500;">${cat.label}</span>
+          </div>
+          <div style="text-align:right;font-size:13px;color:var(--muted2);">${isNonInv ? '–' : fmt.format(cat.inv)}</div>
+          <div style="text-align:right;font-size:14px;font-weight:600;">${fmt.format(cat.val)}</div>
+          <div style="text-align:right;font-size:13px;font-weight:600;color:${pnlColor};">${isNonInv ? '–' : (cat.pnl >= 0 ? '+' : '') + fmt.format(cat.pnl)}</div>
+          <div>${isNonInv ? '<div style="text-align:right;color:var(--muted2);font-size:12px;">–</div>' : perfBar(cat.perf)}</div>
+        </div>
+      </div>`;
+    }).join('')}
+
+    <!-- TOTAL row -->
+    <div style="display:grid;grid-template-columns:1fr 100px 100px 110px 150px;align-items:center;padding:14px 20px;gap:8px;background:var(--surface2);border-top:2px solid var(--border);">
+      <div style="font-size:14px;font-weight:700;letter-spacing:-0.3px;">TOTAL</div>
+      <div style="text-align:right;font-size:13px;font-weight:600;">${fmt.format(totalInv)}</div>
+      <div style="text-align:right;font-size:14px;font-weight:700;">${fmt.format(totalVal2)}</div>
+      <div style="text-align:right;font-size:13px;font-weight:700;color:${totalPnl >= 0 ? 'var(--green)' : 'var(--danger)'};">${totalPnl >= 0 ? '+' : ''}${fmt.format(totalPnl)}</div>
+      <div>${perfBar(totalPerf)}</div>
+    </div>
+  `;
 
   // Show debts row in net mode
   if (patrimoineMode === 'net') {
@@ -469,16 +509,26 @@ function normalizePct(v) {
 
 function renderPnlStats(totalAssets) {
   // Exclude EPA:AIR from sheets-cto (same double-count exclusion as totalAssets)
-  const invested = assets
-    .filter(a => !(a.source === 'sheets-cto' && a.ticker === 'EPA:AIR'))
-    .reduce((s, a) => s + assetCost(a), 0);
-  const pnl = totalAssets - invested;
-  const pnlPct = invested > 0 ? ((pnl / invested) * 100).toFixed(2) : 0;
+  const filteredAssets = assets.filter(a => !(a.source === 'sheets-cto' && a.ticker === 'EPA:AIR'));
+
+  // Use 'investi' field directly from Sheet when available — it's the most accurate
+  // because it includes all deposits over time, not just qty × buyPrice
+  const invested = filteredAssets.reduce((s, a) => s + assetCost(a), 0);
+
+  // Total value also filtered consistently
+  const totalVal = filteredAssets.reduce((s, a) => s + assetValue(a), 0);
+  const savings  = showSavingsInTotal ? window.savings?.reduce((s, sv) => s + (sv.balance || 0), 0) || 0 : 0;
+
+  // P&L = current total (assets + savings if shown) minus invested (assets only — savings have no cost)
+  const pnl    = totalVal + savings - invested;
+  const pnlPct = invested > 0 ? ((totalVal - invested) / invested * 100).toFixed(2) : 0;
+
   const color = pnl >= 0 ? '#22c55e' : '#ef4444';
   const el = document.getElementById('kpi-pnl');
-  if (el) { el.textContent = fmt.format(pnl); el.style.color = color; }
-  safeSet('kpi-pnl-pct', (pnl >= 0 ? '+' : '') + pnlPct + '%');
-  safeSet('statPositions', assets.length);
+  if (el) { el.textContent = (pnl >= 0 ? '+' : '') + fmt.format(pnl); el.style.color = color; }
+  const pctEl = document.getElementById('kpi-pnl-pct');
+  if (pctEl) { pctEl.textContent = (parseFloat(pnlPct) >= 0 ? '+' : '') + pnlPct + '%'; pctEl.style.color = color; }
+  safeSet('statPositions', filteredAssets.length);
 
   // Update inline P&L in hero section (next to total)
   const inlineEl = document.getElementById('kpi-pnl-inline');
@@ -488,20 +538,20 @@ function renderPnlStats(totalAssets) {
   }
   const inlinePctEl = document.getElementById('kpi-pnl-pct-inline');
   if (inlinePctEl) {
-    inlinePctEl.textContent = (pnl >= 0 ? '+' : '') + pnlPct + '%';
-    inlinePctEl.className = 'badge ' + (pnl >= 0 ? 'badge-up' : 'badge-down');
+    inlinePctEl.textContent = (parseFloat(pnlPct) >= 0 ? '+' : '') + pnlPct + '%';
+    inlinePctEl.className = 'badge ' + (parseFloat(pnlPct) >= 0 ? 'badge-up' : 'badge-down');
   }
 
-  // Compute actual daily/weekly/monthly/YTD P&L from asset data
+  // Compute daily/weekly/monthly/YTD P&L from asset period perf fields
+  // Only use assets that actually have period data (non-zero)
   const computePeriodPnl = (field) => {
-    return assets.reduce((s, a) => {
+    return filteredAssets.reduce((s, a) => {
       const val = assetValue(a);
       const pctRaw = a[field];
-      if (!pctRaw || isNaN(pctRaw)) return s;
+      if (!pctRaw || isNaN(pctRaw) || pctRaw === 0) return s;
       const pct = normalizePct(pctRaw) / 100;
-      // reverse: val / (1 + pct) = val_before, delta = val - val_before
-      const delta = val - val / (1 + pct);
-      return s + delta;
+      // val_before = val / (1 + pct), delta = val - val_before
+      return s + (val - val / (1 + pct));
     }, 0);
   };
 
@@ -513,6 +563,7 @@ function renderPnlStats(totalAssets) {
   [['statD1', d1Val], ['statW1', w1Val], ['statM1', m1Val], ['statYtd', ytdVal]].forEach(([id, v]) => {
     const e = document.getElementById(id);
     if (!e) return;
+    if (v === 0) { e.textContent = '–'; e.style.color = 'var(--muted2)'; return; }
     e.textContent = (v >= 0 ? '+' : '') + fmt.format(v);
     e.style.color = v >= 0 ? '#22c55e' : '#ef4444';
   });
