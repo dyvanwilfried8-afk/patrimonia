@@ -382,38 +382,37 @@ function renderCategoryCards(totalAssets, totalSav, total) {
 
   el.innerHTML = `
     <!-- Header -->
-    <div style="display:grid;grid-template-columns:1fr 100px 100px 110px 150px;padding:8px 20px;background:var(--surface2);border-bottom:1px solid var(--border);gap:8px;">
+    <div class="cat-grid-header" style="display:grid;grid-template-columns:1fr 100px 100px 110px 150px;padding:8px 20px;background:var(--surface2);border-bottom:1px solid var(--border);gap:8px;align-items:center;">
       <div style="font-size:10px;font-weight:600;color:var(--muted2);text-transform:uppercase;letter-spacing:0.5px;">Actif</div>
-      <div style="font-size:10px;font-weight:600;color:var(--muted2);text-transform:uppercase;letter-spacing:0.5px;text-align:right;">Investi</div>
+      <div class="cat-col-inv" style="font-size:10px;font-weight:600;color:var(--muted2);text-transform:uppercase;letter-spacing:0.5px;text-align:right;">Investi</div>
       <div style="font-size:10px;font-weight:600;color:var(--muted2);text-transform:uppercase;letter-spacing:0.5px;text-align:right;">Val. Totale</div>
       <div style="font-size:10px;font-weight:600;color:var(--muted2);text-transform:uppercase;letter-spacing:0.5px;text-align:right;">Plus-Value</div>
-      <div style="font-size:10px;font-weight:600;color:var(--muted2);text-transform:uppercase;letter-spacing:0.5px;text-align:right;">Performance</div>
+      <div class="cat-col-perf" style="font-size:10px;font-weight:600;color:var(--muted2);text-transform:uppercase;letter-spacing:0.5px;text-align:right;">Performance</div>
     </div>
 
     ${catData.map(cat => {
       const pnlColor  = cat.pnl  >= 0 ? 'var(--green)' : 'var(--danger)';
       const isNonInv  = cat.id === 'savings';
-      return `<div class="cat-card" onclick="navigate('${cat.id === 'savings' ? 'savings' : 'portfolio'}')">
-        <div style="display:grid;grid-template-columns:1fr 100px 100px 110px 150px;align-items:center;width:100%;padding:14px 20px;gap:8px;">
-          <div style="display:flex;align-items:center;gap:10px;">
-            <div style="width:10px;height:10px;border-radius:50%;background:${cat.dot};flex-shrink:0;"></div>
-            <span style="font-size:14px;font-weight:500;">${cat.label}</span>
-          </div>
-          <div style="text-align:right;font-size:13px;color:var(--muted2);">${isNonInv ? '–' : fmt.format(cat.inv)}</div>
-          <div style="text-align:right;font-size:14px;font-weight:600;">${fmt.format(cat.val)}</div>
-          <div style="text-align:right;font-size:13px;font-weight:600;color:${pnlColor};">${isNonInv ? '–' : (cat.pnl >= 0 ? '+' : '') + fmt.format(cat.pnl)}</div>
-          <div>${isNonInv ? '<div style="text-align:right;color:var(--muted2);font-size:12px;">–</div>' : perfBar(cat.perf)}</div>
+      return `<div class="cat-card cat-grid-row" onclick="navigate('${cat.id === 'savings' ? 'savings' : 'portfolio'}')"
+        style="display:grid;grid-template-columns:1fr 100px 100px 110px 150px;align-items:center;width:100%;padding:14px 20px;gap:8px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="width:10px;height:10px;border-radius:50%;background:${cat.dot};flex-shrink:0;"></div>
+          <span style="font-size:13px;font-weight:500;line-height:1.3;">${cat.label}</span>
         </div>
+        <div class="cat-col-inv cat-inv" style="text-align:right;font-size:13px;color:var(--muted2);">${isNonInv ? '–' : fmt.format(cat.inv)}</div>
+        <div class="cat-val" style="text-align:right;font-size:13px;font-weight:600;">${fmt.format(cat.val)}</div>
+        <div class="cat-pnl" style="text-align:right;font-size:13px;font-weight:600;color:${pnlColor};">${isNonInv ? '–' : (cat.pnl >= 0 ? '+' : '') + fmt.format(cat.pnl)}</div>
+        <div class="cat-col-perf">${isNonInv ? '<div style="text-align:right;color:var(--muted2);font-size:12px;">–</div>' : perfBar(cat.perf)}</div>
       </div>`;
     }).join('')}
 
     <!-- TOTAL row -->
-    <div style="display:grid;grid-template-columns:1fr 100px 100px 110px 150px;align-items:center;padding:14px 20px;gap:8px;background:var(--surface2);border-top:2px solid var(--border);">
+    <div class="cat-grid-row" style="display:grid;grid-template-columns:1fr 100px 100px 110px 150px;align-items:center;padding:14px 20px;gap:8px;background:var(--surface2);border-top:2px solid var(--border);">
       <div style="font-size:14px;font-weight:700;letter-spacing:-0.3px;">TOTAL</div>
-      <div style="text-align:right;font-size:13px;font-weight:600;">${fmt.format(totalInv)}</div>
-      <div style="text-align:right;font-size:14px;font-weight:700;">${fmt.format(totalVal2)}</div>
+      <div class="cat-col-inv" style="text-align:right;font-size:13px;font-weight:600;">${fmt.format(totalInv)}</div>
+      <div style="text-align:right;font-size:13px;font-weight:700;">${fmt.format(totalVal2)}</div>
       <div style="text-align:right;font-size:13px;font-weight:700;color:${totalPnl >= 0 ? 'var(--green)' : 'var(--danger)'};">${totalPnl >= 0 ? '+' : ''}${fmt.format(totalPnl)}</div>
-      <div>${perfBar(totalPerf)}</div>
+      <div class="cat-col-perf">${perfBar(totalPerf)}</div>
     </div>
   `;
 
