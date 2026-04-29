@@ -678,6 +678,16 @@
       .portfolio-col-jour,
       .portfolio-col-hebdo,
       .portfolio-col-mois { display: none; }
+
+      /* ── Tableau catégories : 3 colonnes sur mobile ── */
+      /* Masquer colonne Performance (barre) — garder Nom, Investi, Val, P&L */
+      .cat-grid-header,
+      .cat-grid-row { grid-template-columns: 1fr 80px 80px 80px !important; }
+      .cat-col-perf { display: none !important; }
+      /* Réduire la taille de texte dans les cellules */
+      .cat-grid-row .cat-val  { font-size: 12px !important; }
+      .cat-grid-row .cat-inv  { font-size: 12px !important; }
+      .cat-grid-row .cat-pnl  { font-size: 12px !important; }
     }
 
     /* Mobile small (≤ 480px) */
@@ -693,6 +703,12 @@
       .region-grid { grid-template-columns: repeat(2, 1fr); }
       /* Portfolio : garder seulement l'essentiel */
       .portfolio-col-ytd { display: none; }
+
+      /* ── Tableau catégories : 2 colonnes sur très petit écran ── */
+      .cat-grid-header,
+      .cat-grid-row { grid-template-columns: 1fr 90px 90px !important; }
+      .cat-col-inv  { display: none !important; }
+      .cat-col-perf { display: none !important; }
     }
 
     /* Very small (≤ 360px) */
@@ -1062,16 +1078,7 @@
               </div>
             </div>
 
-            <!-- Header colonnes -->
-            <div style="display:grid;grid-template-columns:1fr 100px 100px 110px 150px;padding:6px 20px;background:var(--surface2);border-top:1px solid var(--border);border-bottom:1px solid var(--border);">
-              <div style="font-size:10px;font-weight:600;color:var(--muted2);text-transform:uppercase;letter-spacing:0.5px;">Nom</div>
-              <div style="font-size:10px;font-weight:600;color:var(--muted2);text-transform:uppercase;letter-spacing:0.5px;text-align:right;">Investi</div>
-              <div style="font-size:10px;font-weight:600;color:var(--muted2);text-transform:uppercase;letter-spacing:0.5px;text-align:right;">Val. Totale</div>
-              <div style="font-size:10px;font-weight:600;color:var(--muted2);text-transform:uppercase;letter-spacing:0.5px;text-align:right;">Plus-Value</div>
-              <div style="font-size:10px;font-weight:600;color:var(--muted2);text-transform:uppercase;letter-spacing:0.5px;text-align:right;">Performance</div>
-            </div>
-
-            <!-- Rows dynamiques -->
+            <!-- Header colonnes — rendu dynamiquement par renderCategoryCards -->
             <div id="categoryCards"></div>
           </div>
 
