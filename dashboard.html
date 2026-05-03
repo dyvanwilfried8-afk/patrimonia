@@ -1965,8 +1965,17 @@
            PAGE: SIMULATION DE PRÊT
       ══════════════════════════════════════ -->
       <section class="page-section" id="page-loan">
-        <div class="section-title">🏠 Simulation de prêt immobilier</div>
-        <div class="section-sub">Capacité d'emprunt et comparaison des banques</div>
+        <div class="section-title">🏠 Prêt immobilier</div>
+        <div class="section-sub">Simulation de capacité et suivi de votre prêt en cours</div>
+
+        <!-- TABS -->
+        <div style="display:flex;gap:4px;margin-bottom:24px;background:var(--surface2);border-radius:10px;padding:4px;width:fit-content;">
+          <button id="loanTab-sim" onclick="switchLoanTab('sim')" style="padding:8px 20px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:500;background:var(--accent);color:#fff;transition:all .15s;">📊 Simulation</button>
+          <button id="loanTab-track" onclick="switchLoanTab('track')" style="padding:8px 20px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:500;background:none;color:var(--muted2);transition:all .15s;">📋 Suivi prêt</button>
+        </div>
+
+        <!-- ═══ ONGLET SIMULATION ═══ -->
+        <div id="loanPane-sim">
 
         <!-- KPIs -->
         <div class="kpi-grid" style="margin-bottom:24px;">
@@ -2057,6 +2066,20 @@
           </div>
           <div style="margin-top:12px;font-size:11px;color:var(--muted2);">* Taux indicatifs. Coût du crédit = intérêts + frais de dossier. Assurance non incluse.</div>
         </div>
+        </div><!-- /loanPane-sim -->
+
+        <!-- ═══ ONGLET SUIVI PRÊT ═══ -->
+        <div id="loanPane-track" style="display:none;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px;">
+            <div>
+              <div style="font-size:14px;font-weight:600;">Mes prêts en cours</div>
+              <div style="font-size:12px;color:var(--muted2);">Capital restant dû, intérêts payés, progression</div>
+            </div>
+            <button class="btn btn-accent" onclick="openAddLoan()" style="font-size:12px;padding:8px 16px;">+ Ajouter un prêt</button>
+          </div>
+          <div id="loanTrackingList"></div>
+        </div>
+
       </section>
 
     </div><!-- /content -->
@@ -2174,6 +2197,78 @@
       <div style="margin-top:20px; display:flex; gap:8px; justify-content:flex-end;">
         <button class="btn btn-ghost" onclick="closeModal('addAsset')">Annuler</button>
         <button class="btn btn-accent" onclick="addAsset()">Ajouter</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── MODAL : Modifier un livret ── -->
+  <div class="modal-overlay" id="modal-editSavings">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">Modifier le livret</div>
+        <button class="close-btn" onclick="closeModal('editSavings')">✕</button>
+      </div>
+      <input type="hidden" id="editSavIdx">
+      <div class="field-group">
+        <label class="field-label">Nom du compte</label>
+        <input class="field-input" id="editSavName" placeholder="Livret A, LDDS, PEL...">
+      </div>
+      <div class="form-grid">
+        <div>
+          <label class="field-label">Solde (€)</label>
+          <input class="field-input" type="number" id="editSavBal" placeholder="0">
+        </div>
+        <div>
+          <label class="field-label">Taux annuel (%)</label>
+          <input class="field-input" type="number" id="editSavRate" placeholder="3.0" step="0.1">
+        </div>
+      </div>
+      <div style="margin-top:20px;display:flex;gap:8px;justify-content:flex-end;">
+        <button class="btn btn-ghost" onclick="closeModal('editSavings')">Annuler</button>
+        <button class="btn btn-accent" onclick="saveEditSavings()">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── MODAL : Ajouter/Modifier un prêt suivi ── -->
+  <div class="modal-overlay" id="modal-addLoanTracked">
+    <div class="modal" style="max-width:500px;">
+      <div class="modal-header">
+        <div class="modal-title">Ajouter un prêt</div>
+        <button class="close-btn" onclick="closeModal('addLoanTracked')">✕</button>
+      </div>
+      <input type="hidden" id="loanTrackedIdx" value="-1">
+      <div class="field-group">
+        <label class="field-label">Nom du prêt</label>
+        <input class="field-input" id="loanTrackedNom" placeholder="Prêt principal, Résidence secondaire...">
+      </div>
+      <div class="form-grid">
+        <div>
+          <label class="field-label">Capital emprunté (€)</label>
+          <input class="field-input" type="number" id="loanTrackedCapital" placeholder="200 000">
+        </div>
+        <div>
+          <label class="field-label">Taux annuel (%)</label>
+          <input class="field-input" type="number" id="loanTrackedTaux" placeholder="3.5" step="0.01">
+        </div>
+      </div>
+      <div class="form-grid">
+        <div>
+          <label class="field-label">Durée (années)</label>
+          <input class="field-input" type="number" id="loanTrackedDuree" placeholder="20">
+        </div>
+        <div>
+          <label class="field-label">Date de début</label>
+          <input class="field-input" type="month" id="loanTrackedDate">
+        </div>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Assurance mensuelle (€) <span style="color:var(--muted2);font-size:10px;">optionnel</span></label>
+        <input class="field-input" type="number" id="loanTrackedAssurance" placeholder="0" step="0.01">
+      </div>
+      <div style="margin-top:20px;display:flex;gap:8px;justify-content:flex-end;">
+        <button class="btn btn-ghost" onclick="closeModal('addLoanTracked')">Annuler</button>
+        <button class="btn btn-accent" onclick="saveLoanTracked()">Enregistrer</button>
       </div>
     </div>
   </div>
