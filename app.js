@@ -82,7 +82,7 @@ function navigate(pageId) {
   if (pageId === 'salary')     renderSalary();
   if (pageId === 'portfolio')  { renderPortfolio(); renderAssetChart(); }
   if (pageId === 'fiscalite')  { autoFillFiscalFromSalary(); if(typeof calculateTax==='function') calculateTax(); }
-  if (pageId === 'loan')       updateLoanCalc();
+  if (pageId === 'loan')       { updateLoanCalc(); renderLoanTracking(); }
 }
 
 function toggleSidebar() {
@@ -1005,32 +1005,265 @@ function renderSavings() {
   safeSet('savingsAvgRate', avg + '%');
   const list = document.getElementById('savingsList');
   if (list) list.innerHTML = savings.length ? savings.map((sv,i)=>`
-    <div class="fee-item">
-      <div><div style="font-size:14px;font-weight:500;">${sv.name}</div><div style="font-size:12px;color:var(--muted2);">Taux : ${sv.rate||0}%</div></div>
-      <div style="text-align:right;"><div style="font-weight:600;">${fmt.format(sv.balance||0)}</div>
-      <button onclick="deleteSavings(${i})" style="font-size:11px;color:var(--danger);background:none;border:none;cursor:pointer;">Supprimer</button></div>
-    </div>`).join('') : '<div class="empty-state"><div class="icon">🏦</div><p>Aucun livret</p></div>';
+    <div class="fee-item" style="align-items:center;">
+      <div style="flex:1;">
+        <div style="font-size:14px;font-weight:500;">${sv.name}</div>
+        <div style="font-size:12px;color:var(--muted2);">Taux : ${sv.rate||0}% · Intérêts/an : ${fmt.format((sv.balance||0)*(sv.rate||0)/100)}</div>
+      </div>
+      <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+        <div style="font-weight:600;font-size:15px;">${fmt.format(sv.balance||0)}</div>
+        <div style="display:flex;gap:8px;">
+          <button onclick="openEditSavings(${i})" style="font-size:11px;color:var(--blue);background:none;border:none;cursor:pointer;padding:2px 6px;border-radius:4px;border:1px solid var(--blue);">✏️ Modifier</button>
+          <button onclick="deleteSavings(${i})" style="font-size:11px;color:var(--danger);background:none;border:none;cursor:pointer;padding:2px 6px;border-radius:4px;border:1px solid var(--danger);">🗑 Supprimer</button>
+        </div>
+      </div>
+    </div>`).join('') : '<div class="empty-state"><div class="icon">🏦</div><p>Aucun livret</p><p style="font-size:12px;color:var(--muted2);">Cliquez sur "+ Ajouter" pour commencer</p></div>';
   const ctx = document.getElementById('chartSavings');
   if (ctx && savings.length) {
     if (chartSavingsInstance) chartSavingsInstance.destroy();
     chartSavingsInstance = new Chart(ctx.getContext('2d'), {
       type:'doughnut',
-      data:{ labels:savings.map(s=>s.name), datasets:[{data:savings.map(s=>s.balance), backgroundColor:['#3b82f6','#22c55e','#f59e0b','#a78bfa','#ef4444'], borderWidth:0}] },
+      data:{ labels:savings.map(s=>s.name), datasets:[{data:savings.map(s=>s.balance), backgroundColor:['#3b82f6','#22c55e','#f59e0b','#a78bfa','#ef4444','#06b6d4'], borderWidth:0}] },
       options:{cutout:'65%',plugins:{legend:{position:'right',labels:{color:getComputedStyle(document.documentElement).getPropertyValue('--text')||'#fff',font:{size:11}}}}}
     });
   }
+}
+
+function openEditSavings(i) {
+  const sv = savings[i];
+  if (!sv) return;
+  document.getElementById('editSavIdx').value  = i;
+  document.getElementById('editSavName').value  = sv.name    || '';
+  document.getElementById('editSavBal').value   = sv.balance || 0;
+  document.getElementById('editSavRate').value  = sv.rate    || 0;
+  openModal('editSavings');
+}
+
+function saveEditSavings() {
+  const i = parseInt(document.getElementById('editSavIdx').value);
+  if (isNaN(i) || !savings[i]) return;
+  savings[i] = {
+    ...savings[i],
+    name:    document.getElementById('editSavName').value.trim() || savings[i].name,
+    balance: parseFloat(document.getElementById('editSavBal').value)  || 0,
+    rate:    parseFloat(document.getElementById('editSavRate').value)  || 0,
+  };
+  saveLocalData(); closeModal('editSavings'); renderSavings(); initOverview();
+  showToast('Livret mis à jour ✓', '#22c55e');
 }
 
 function addSavings() {
   const name=document.getElementById('savName')?.value?.trim();
   if (!name) return showToast('Entrez un nom','#ef4444');
   savings.push({ name, balance:parseFloat(document.getElementById('savBalance')?.value)||0, rate:parseFloat(document.getElementById('savRate')?.value)||0 });
+  // Reset form
+  ['savName','savBalance','savRate'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
   saveLocalData(); closeModal('addSavings'); renderSavings(); initOverview(); showToast('Livret ajouté ✓','#22c55e');
 }
 
-function deleteSavings(i) { savings.splice(i,1); saveLocalData(); renderSavings(); initOverview(); }
+function deleteSavings(i) {
+  if (!confirm(`Supprimer "${savings[i]?.name}" ?`)) return;
+  savings.splice(i,1); saveLocalData(); renderSavings(); initOverview();
+}
 
-// ─── SALAIRE ─────────────────────────────────────────────────────────────
+function switchLoanTab(tab) {
+  document.getElementById('loanPane-sim').style.display   = tab === 'sim'   ? 'block' : 'none';
+  document.getElementById('loanPane-track').style.display = tab === 'track' ? 'block' : 'none';
+  document.getElementById('loanTab-sim').style.background   = tab === 'sim'   ? 'var(--accent)' : 'none';
+  document.getElementById('loanTab-sim').style.color        = tab === 'sim'   ? '#fff'          : 'var(--muted2)';
+  document.getElementById('loanTab-track').style.background = tab === 'track' ? 'var(--accent)' : 'none';
+  document.getElementById('loanTab-track').style.color      = tab === 'track' ? '#fff'          : 'var(--muted2)';
+  if (tab === 'track') renderLoanTracking();
+}
+
+
+
+let loansTracked = [];
+try { loansTracked = JSON.parse(localStorage.getItem('patrimonia_loans') || '[]'); } catch(e) {}
+
+function saveLoans() {
+  localStorage.setItem('patrimonia_loans', JSON.stringify(loansTracked));
+  // Sync to Supabase via saveLocalData hook
+  clearTimeout(_saveDebounceTimer);
+  _saveDebounceTimer = setTimeout(() => saveToSupabase(), 1500);
+}
+
+function renderLoanTracking() {
+  const container = document.getElementById('loanTrackingList');
+  if (!container) return;
+
+  if (!loansTracked.length) {
+    container.innerHTML = `<div class="empty-state" style="padding:32px 0;">
+      <div class="icon">🏠</div>
+      <p>Aucun prêt enregistré</p>
+      <p style="font-size:12px;color:var(--muted2);">Ajoutez votre prêt pour suivre l'évolution du capital restant dû</p>
+    </div>`;
+    return;
+  }
+
+  container.innerHTML = loansTracked.map((loan, idx) => {
+    const capital     = loan.capital || 0;
+    const taux        = (loan.taux || 0) / 100 / 12;
+    const dureeM      = (loan.duree || 0) * 12;
+    const dateDebut   = new Date(loan.dateDebut || Date.now());
+    const now         = new Date();
+
+    // Mensualité
+    const mens = taux > 0
+      ? capital * taux / (1 - Math.pow(1 + taux, -dureeM))
+      : capital / dureeM;
+
+    // Mois écoulés depuis début
+    const moisEcoules = Math.max(0, Math.floor(
+      (now - dateDebut) / (1000 * 60 * 60 * 24 * 30.44)
+    ));
+    const moisRestants = Math.max(0, dureeM - moisEcoules);
+
+    // Calcul du capital restant dû
+    let capitalRestant = capital;
+    let totalInterets = 0;
+    let totalCapitalRemb = 0;
+    for (let m = 0; m < Math.min(moisEcoules, dureeM); m++) {
+      const interetsMois = capitalRestant * taux;
+      const capitalMois  = mens - interetsMois;
+      totalInterets     += interetsMois;
+      totalCapitalRemb  += capitalMois;
+      capitalRestant    -= capitalMois;
+    }
+    capitalRestant = Math.max(0, capitalRestant);
+    const pctRembourse = capital > 0 ? ((capital - capitalRestant) / capital * 100) : 0;
+    const dateFin = new Date(dateDebut);
+    dateFin.setMonth(dateFin.getMonth() + dureeM);
+
+    // Intérêts restants à payer
+    let interetsRestants = 0;
+    let cr = capitalRestant;
+    for (let m = 0; m < moisRestants; m++) {
+      const im = cr * taux;
+      cr -= (mens - im);
+      interetsRestants += im;
+    }
+
+    return `<div class="panel" style="margin-bottom:16px;">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px;">
+        <div>
+          <div style="font-size:16px;font-weight:600;">${loan.nom || 'Prêt immobilier'}</div>
+          <div style="font-size:12px;color:var(--muted2);">Depuis ${dateDebut.toLocaleDateString('fr-FR',{month:'long',year:'numeric'})} · Fin ${dateFin.toLocaleDateString('fr-FR',{month:'long',year:'numeric'})}</div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button onclick="openEditLoan(${idx})" style="font-size:11px;color:var(--blue);background:none;border:1px solid var(--blue);border-radius:6px;padding:4px 10px;cursor:pointer;">✏️ Modifier</button>
+          <button onclick="deleteLoan(${idx})" style="font-size:11px;color:var(--danger);background:none;border:1px solid var(--danger);border-radius:6px;padding:4px 10px;cursor:pointer;">🗑</button>
+        </div>
+      </div>
+
+      <!-- Barre de progression -->
+      <div style="margin-bottom:16px;">
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted2);margin-bottom:6px;">
+          <span>${moisEcoules} mois remboursés</span>
+          <span>${moisRestants} mois restants</span>
+        </div>
+        <div style="height:10px;background:var(--surface2);border-radius:5px;overflow:hidden;">
+          <div style="height:100%;width:${pctRembourse.toFixed(1)}%;background:linear-gradient(90deg,#22c55e,#3b82f6);border-radius:5px;transition:width 0.5s;"></div>
+        </div>
+        <div style="text-align:center;font-size:11px;color:var(--muted2);margin-top:4px;">${pctRembourse.toFixed(1)}% remboursé</div>
+      </div>
+
+      <!-- KPIs -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-bottom:16px;">
+        <div style="padding:12px;background:var(--surface2);border-radius:8px;text-align:center;">
+          <div style="font-size:10px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Capital emprunté</div>
+          <div style="font-size:15px;font-weight:600;">${fmt.format(capital)}</div>
+        </div>
+        <div style="padding:12px;background:rgba(239,68,68,0.06);border-radius:8px;text-align:center;border:1px solid rgba(239,68,68,0.15);">
+          <div style="font-size:10px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Capital restant dû</div>
+          <div style="font-size:15px;font-weight:700;color:var(--danger);">${fmt.format(capitalRestant)}</div>
+        </div>
+        <div style="padding:12px;background:rgba(34,197,94,0.06);border-radius:8px;text-align:center;border:1px solid rgba(34,197,94,0.15);">
+          <div style="font-size:10px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Capital remboursé</div>
+          <div style="font-size:15px;font-weight:700;color:var(--green);">${fmt.format(capital - capitalRestant)}</div>
+        </div>
+        <div style="padding:12px;background:var(--surface2);border-radius:8px;text-align:center;">
+          <div style="font-size:10px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Mensualité</div>
+          <div style="font-size:15px;font-weight:600;">${fmt.format(mens)}</div>
+        </div>
+        <div style="padding:12px;background:var(--surface2);border-radius:8px;text-align:center;">
+          <div style="font-size:10px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Intérêts payés</div>
+          <div style="font-size:15px;font-weight:600;color:var(--muted);">${fmt.format(totalInterets)}</div>
+        </div>
+        <div style="padding:12px;background:var(--surface2);border-radius:8px;text-align:center;">
+          <div style="font-size:10px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Intérêts restants</div>
+          <div style="font-size:15px;font-weight:600;color:var(--muted);">${fmt.format(interetsRestants)}</div>
+        </div>
+      </div>
+
+      <!-- Détails -->
+      <div style="font-size:12px;color:var(--muted2);display:flex;flex-wrap:wrap;gap:12px;padding-top:12px;border-top:1px solid var(--border);">
+        <span>📊 Taux : <b>${loan.taux || 0}%</b></span>
+        <span>⏱ Durée : <b>${loan.duree || 0} ans</b></span>
+        <span>💰 Coût total crédit : <b>${fmt.format(totalInterets + interetsRestants)}</b></span>
+        ${loan.assurance ? `<span>🛡 Assurance : <b>${fmt.format(loan.assurance)}/mois</b></span>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function openAddLoan() {
+  // Reset form
+  ['loanTrackedNom','loanTrackedCapital','loanTrackedTaux','loanTrackedDuree','loanTrackedDate','loanTrackedAssurance'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = '';
+  });
+  document.getElementById('loanTrackedIdx').value = -1;
+  document.getElementById('modal-addLoanTracked').querySelector('.modal-title').textContent = 'Ajouter un prêt';
+  openModal('addLoanTracked');
+}
+
+function openEditLoan(idx) {
+  const loan = loansTracked[idx];
+  if (!loan) return;
+  document.getElementById('loanTrackedIdx').value        = idx;
+  document.getElementById('loanTrackedNom').value        = loan.nom || '';
+  document.getElementById('loanTrackedCapital').value    = loan.capital || '';
+  document.getElementById('loanTrackedTaux').value       = loan.taux || '';
+  document.getElementById('loanTrackedDuree').value      = loan.duree || '';
+  document.getElementById('loanTrackedDate').value       = loan.dateDebut ? loan.dateDebut.substring(0,7) : '';
+  document.getElementById('loanTrackedAssurance').value  = loan.assurance || '';
+  document.getElementById('modal-addLoanTracked').querySelector('.modal-title').textContent = 'Modifier le prêt';
+  openModal('addLoanTracked');
+}
+
+function saveLoanTracked() {
+  const nom       = document.getElementById('loanTrackedNom')?.value?.trim() || 'Mon prêt';
+  const capital   = parseFloat(document.getElementById('loanTrackedCapital')?.value) || 0;
+  const taux      = parseFloat(document.getElementById('loanTrackedTaux')?.value)    || 0;
+  const duree     = parseInt(document.getElementById('loanTrackedDuree')?.value)     || 0;
+  const dateRaw   = document.getElementById('loanTrackedDate')?.value;
+  const assurance = parseFloat(document.getElementById('loanTrackedAssurance')?.value) || 0;
+
+  if (!capital || !duree) return showToast('Renseignez le capital et la durée', '#ef4444');
+  // Parse month input (YYYY-MM) → first of month
+  const dateDebut = dateRaw ? dateRaw + '-01' : new Date().toISOString().substring(0,10);
+
+  const loan = { nom, capital, taux, duree, dateDebut, assurance };
+  const idx  = parseInt(document.getElementById('loanTrackedIdx')?.value ?? -1);
+  if (idx >= 0 && loansTracked[idx]) {
+    loansTracked[idx] = loan;
+    showToast('Prêt mis à jour ✓', '#22c55e');
+  } else {
+    loansTracked.push(loan);
+    showToast('Prêt ajouté ✓', '#22c55e');
+  }
+  saveLoans();
+  closeModal('addLoanTracked');
+  renderLoanTracking();
+}
+
+function deleteLoan(idx) {
+  if (!confirm(`Supprimer "${loansTracked[idx]?.nom || 'ce prêt'}" ?`)) return;
+  loansTracked.splice(idx, 1);
+  saveLoans();
+  renderLoanTracking();
+}
+
 
 function renderSalary() {
   const net=salaryData.net||0, saved=salaryData.saved||0;
