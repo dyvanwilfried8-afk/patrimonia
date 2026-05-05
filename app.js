@@ -751,19 +751,25 @@ function loadHistoPoints() {
 // Filter histo points by period
 function filterHistoByPeriod(points, period) {
   if (!points.length) return points;
+  // Only use points with real values
+  const validPoints = points.filter(h => h.val > 0);
+  if (!validPoints.length) return [];
+
   const now = new Date();
   let cutoff = new Date(now);
   switch(period) {
-    case '1J':  cutoff.setDate(now.getDate() - 1); break;
-    case '7J':  cutoff.setDate(now.getDate() - 7); break;
-    case '1M':  cutoff.setMonth(now.getMonth() - 1); break;
+    case '1J':  cutoff.setDate(now.getDate() - 2);  break; // last 2 days
+    case '7J':  cutoff.setDate(now.getDate() - 8);  break; // last 8 days
+    case '1M':  cutoff.setMonth(now.getMonth() - 2); break; // last 2 months (for monthly data)
     case '3M':  cutoff.setMonth(now.getMonth() - 3); break;
     case 'YTD': cutoff = new Date(now.getFullYear(), 0, 1); break;
     case '1A':  cutoff.setFullYear(now.getFullYear() - 1); break;
-    case 'TOUT': return points;
+    case 'TOUT': return validPoints;
     default:    cutoff = new Date(now.getFullYear(), 0, 1);
   }
-  return points.filter(h => new Date(h.date) >= cutoff);
+  const filtered = validPoints.filter(h => new Date(h.date) >= cutoff);
+  // Always return at least 2 points (take last 2 if filter is too strict)
+  return filtered.length >= 2 ? filtered : validPoints.slice(-2);
 }
 
 function renderHistoChart(total) {
@@ -776,7 +782,7 @@ function renderHistoChart(total) {
 
   // ── Build curve from REAL historical data if available ──
   const buildRealCurve = (period) => {
-    const filtered = filterHistoByPeriod(histoRaw, period);
+    const filtered = filterHistoByPeriod(histoRaw, period).filter(h => h.val > 0);
     if (filtered.length < 2) return null;
 
     const labels = filtered.map(h => {
@@ -923,12 +929,14 @@ function renderPeriodPnl(period, total) {
   let periodPct = null;
 
   if (histo.length >= 2 && ['YTD','1A','TOUT','3M','1M'].includes(period)) {
-    const filtered = filterHistoByPeriod(histo, period);
+    const filtered = filterHistoByPeriod(histo, period).filter(h => h.val > 0);
     if (filtered.length >= 2) {
       const startVal = filtered[0].val;
       const endVal   = filtered[filtered.length - 1].val;
-      periodPnl = endVal - startVal;
-      periodPct = startVal > 0 ? (periodPnl / startVal * 100) : 0;
+      if (startVal > 0) {
+        periodPnl = endVal - startVal;
+        periodPct = (periodPnl / startVal) * 100;
+      }
     }
   }
 
@@ -1823,20 +1831,19 @@ async function connectSheets(silent = false) {
     // Structure attendue : col A=Date, col B=Investi, col C=Valeur Totale
 
     const parseHistoRow = (row) => {
-      // Date : peut être un serial Google Sheets (nombre) ou une chaîne DD/MM/YYYY
       const rawDate = t(row[0]);
-      const rawVal  = p(row[2]);  // col C = Valeur Totale
+      const rawVal  = p(row[2]);  // col C = Valeur Totale (MUST be > 0 = real data)
       const rawInv  = p(row[1]);  // col B = Investi
+      // Skip header, totals, and future rows (no Valeur Totale yet)
       if (!rawDate || rawDate.toUpperCase() === 'DATE' || rawDate.toUpperCase() === 'TOTAL') return null;
-      if (rawVal <= 0 && rawInv <= 0) return null;
+      // KEY FIX: only keep rows with a real Valeur Totale — skip future rows with only Investi
+      if (rawVal <= 0) return null;
 
       let dateObj = null;
       const serial = parseFloat(rawDate.replace(',', '.'));
       if (!isNaN(serial) && serial > 40000) {
-        // Google Sheets date serial
         dateObj = new Date(Math.round((serial - 25569) * 86400 * 1000));
       } else {
-        // DD/MM/YYYY or YYYY-MM-DD
         const parts = rawDate.split(/[\/\-]/);
         if (parts.length === 3) {
           if (parts[0].length === 4) dateObj = new Date(parseInt(parts[0]), parseInt(parts[1])-1, parseInt(parts[2]));
@@ -1844,29 +1851,24 @@ async function connectSheets(silent = false) {
         }
       }
       if (!dateObj || isNaN(dateObj.getTime())) return null;
+
+      // Also skip rows dated in the future (beyond today)
+      if (dateObj > new Date()) return null;
+
       return { date: dateObj, val: rawVal, inv: rawInv };
     };
 
-    // Consolidate history from multiple Suivi tabs — each tab contributes its own category
-    // We aggregate by month to build a total patrimoine curve
-    const histoByMonth = {}; // key: "YYYY-MM" → { val, inv, sources: Set }
+    const histoByMonth = {};
 
     const addToHisto = (rows, tabName) => {
       if (!rows) return;
-      // Track last known value per source to forward-fill gaps
-      let lastVal = 0, lastInv = 0;
       rows.slice(1).forEach(row => {
         const h = parseHistoRow(row);
-        if (!h) return;
-        // Use last known values if current row has 0 (gap in data)
-        if (h.val > 0) lastVal = h.val;
-        if (h.inv > 0) lastInv = h.inv;
-        const val = h.val > 0 ? h.val : lastVal;
-        const inv = h.inv > 0 ? h.inv : lastInv;
+        if (!h) return; // skips future/empty rows
         const key = `${h.date.getFullYear()}-${String(h.date.getMonth()+1).padStart(2,'0')}`;
         if (!histoByMonth[key]) histoByMonth[key] = { val: 0, inv: 0, sources: new Set(), date: h.date };
-        histoByMonth[key].val += val;
-        histoByMonth[key].inv += inv;
+        histoByMonth[key].val += h.val;
+        histoByMonth[key].inv += h.inv;
         histoByMonth[key].sources.add(tabName);
       });
     };
