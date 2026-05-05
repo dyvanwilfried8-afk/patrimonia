@@ -418,6 +418,7 @@ function initOverview() {
   safeSet('kpi-total', fmt.format(total));
   renderCategoryCards(totalAssets, totalSav, total);
   renderPnlStats(totalAssets);
+  renderPeriodPnl(currentHistoPeriod, total);
   renderBudgetWidget();
   renderBestWorst();
   renderHistoChart(total);
@@ -642,16 +643,32 @@ function renderPnlStats(totalAssets) {
   if (pctEl) { pctEl.textContent = (parseFloat(pnlPct) >= 0 ? '+' : '') + pnlPct + '%'; pctEl.style.color = color; }
   safeSet('statPositions', filteredAssets.length);
 
-  // Update inline P&L in hero section (next to total)
+  // Update inline P&L in hero section — with click toggle €↔% (Trade Republic style)
   const inlineEl = document.getElementById('kpi-pnl-inline');
   if (inlineEl) {
-    inlineEl.textContent = (pnl >= 0 ? '+' : '') + fmt.format(pnl);
-    inlineEl.style.color = color;
+    inlineEl.dataset.eur  = (pnl >= 0 ? '+' : '') + fmt.format(pnl);
+    inlineEl.dataset.pct  = (parseFloat(pnlPct) >= 0 ? '+' : '') + pnlPct + '%';
+    inlineEl.dataset.mode = inlineEl.dataset.mode || 'eur'; // default = €
+    inlineEl.textContent  = inlineEl.dataset.mode === 'pct' ? inlineEl.dataset.pct : inlineEl.dataset.eur;
+    inlineEl.style.color  = color;
+    inlineEl.style.cursor = 'pointer';
+    inlineEl.title        = 'Cliquer pour basculer €/% ';
+    inlineEl.onclick      = () => {
+      inlineEl.dataset.mode = inlineEl.dataset.mode === 'eur' ? 'pct' : 'eur';
+      inlineEl.textContent  = inlineEl.dataset.mode === 'pct' ? inlineEl.dataset.pct : inlineEl.dataset.eur;
+    };
   }
   const inlinePctEl = document.getElementById('kpi-pnl-pct-inline');
   if (inlinePctEl) {
-    inlinePctEl.textContent = (parseFloat(pnlPct) >= 0 ? '+' : '') + pnlPct + '%';
-    inlinePctEl.className = 'badge ' + (parseFloat(pnlPct) >= 0 ? 'badge-up' : 'badge-down');
+    inlinePctEl.textContent  = (parseFloat(pnlPct) >= 0 ? '+' : '') + pnlPct + '%';
+    inlinePctEl.className    = 'badge ' + (parseFloat(pnlPct) >= 0 ? 'badge-up' : 'badge-down');
+    inlinePctEl.style.cursor = 'pointer';
+    inlinePctEl.title        = 'Cliquer pour basculer €/%';
+    inlinePctEl.onclick      = () => {
+      if (!inlineEl) return;
+      inlineEl.dataset.mode = inlineEl.dataset.mode === 'eur' ? 'pct' : 'eur';
+      inlineEl.textContent  = inlineEl.dataset.mode === 'pct' ? inlineEl.dataset.pct : inlineEl.dataset.eur;
+    };
   }
 
   // Compute daily/weekly/monthly/YTD P&L from asset period perf fields
@@ -890,6 +907,76 @@ function setHistoPeriod(period, btn) {
   const totalSav = savings.reduce((s, sv) => s + (sv.balance || 0), 0);
   const total    = showSavingsInTotal ? totalAssets + totalSav : totalAssets;
   renderHistoChart(total);
+  renderPeriodPnl(period, total);
+}
+
+// Render P&L inline + performance panel based on selected period
+function renderPeriodPnl(period, total) {
+  const histo = loadHistoPoints();
+
+  // Map period → perf field for live assets
+  const perfFieldMap = { '1J':'perf1d', '7J':'perfW', '1M':'perfM', '3M':'perfM', 'YTD':'perfYtd', '1A':'perfYtd', 'TOUT':'perfYtd' };
+  const perfField = perfFieldMap[period] || 'perfYtd';
+
+  // Try to get period P&L from historical data first
+  let periodPnl = null;
+  let periodPct = null;
+
+  if (histo.length >= 2 && ['YTD','1A','TOUT','3M','1M'].includes(period)) {
+    const filtered = filterHistoByPeriod(histo, period);
+    if (filtered.length >= 2) {
+      const startVal = filtered[0].val;
+      const endVal   = filtered[filtered.length - 1].val;
+      periodPnl = endVal - startVal;
+      periodPct = startVal > 0 ? (periodPnl / startVal * 100) : 0;
+    }
+  }
+
+  // Fallback: use asset perf fields
+  if (periodPnl === null) {
+    const filteredAssets = assets.filter(a => !(a.source === 'sheets-cto' && a.ticker === 'EPA:AIR'));
+    periodPnl = filteredAssets.reduce((s, a) => {
+      const val = assetValue(a);
+      const pctRaw = a[perfField];
+      if (!pctRaw || isNaN(pctRaw) || pctRaw === 0) return s;
+      const pct = normalizePct(pctRaw) / 100;
+      return s + (val - val / (1 + pct));
+    }, 0);
+    const totalVal = filteredAssets.reduce((s, a) => s + assetValue(a), 0);
+    const startVal = totalVal - periodPnl;
+    periodPct = startVal > 0 ? (periodPnl / startVal * 100) : 0;
+  }
+
+  const color = periodPnl >= 0 ? '#22c55e' : '#ef4444';
+  const sign  = periodPnl >= 0 ? '+' : '';
+
+  // Update inline hero P&L
+  const inlineEl    = document.getElementById('kpi-pnl-inline');
+  const inlinePctEl = document.getElementById('kpi-pnl-pct-inline');
+  if (inlineEl) {
+    inlineEl.dataset.eur = (sign + fmt.format(periodPnl));
+    inlineEl.dataset.pct = (sign + (periodPct).toFixed(2) + '%');
+    inlineEl.style.color = color;
+    // Respect current toggle mode
+    const showPct = inlineEl.dataset.mode === 'pct';
+    inlineEl.textContent = showPct ? inlineEl.dataset.pct : inlineEl.dataset.eur;
+  }
+  if (inlinePctEl) {
+    inlinePctEl.textContent = sign + (periodPct).toFixed(2) + '%';
+    inlinePctEl.className   = 'badge ' + (periodPnl >= 0 ? 'badge-up' : 'badge-down');
+    inlinePctEl.style.cursor = 'pointer';
+  }
+
+  // Update performance panel
+  const pnlEl    = document.getElementById('kpi-pnl');
+  const pnlPctEl = document.getElementById('kpi-pnl-pct');
+  if (pnlEl)    { pnlEl.textContent = sign + fmt.format(periodPnl); pnlEl.style.color = color; }
+  if (pnlPctEl) { pnlPctEl.textContent = sign + (periodPct).toFixed(2) + '%'; pnlPctEl.style.color = color; }
+
+  // Update period label in performance panel
+  const periodLabels = { '1J':'Aujourd\'hui', '7J':'Cette semaine', '1M':'Ce mois', '3M':'3 derniers mois', 'YTD':'Année en cours', '1A':'12 derniers mois', 'TOUT':'Depuis le début' };
+  const perfLabelEl = document.querySelector('#kpi-pnl')?.closest('.panel')?.querySelector('[id*="perf-period-label"], .perf-period-label');
+  safeSet('perfPeriodLabel', periodLabels[period] || 'Période sélectionnée');
 }
 
 // ─── PORTEFEUILLE ────────────────────────────────────────────────────────
@@ -1766,13 +1853,20 @@ async function connectSheets(silent = false) {
 
     const addToHisto = (rows, tabName) => {
       if (!rows) return;
+      // Track last known value per source to forward-fill gaps
+      let lastVal = 0, lastInv = 0;
       rows.slice(1).forEach(row => {
         const h = parseHistoRow(row);
         if (!h) return;
+        // Use last known values if current row has 0 (gap in data)
+        if (h.val > 0) lastVal = h.val;
+        if (h.inv > 0) lastInv = h.inv;
+        const val = h.val > 0 ? h.val : lastVal;
+        const inv = h.inv > 0 ? h.inv : lastInv;
         const key = `${h.date.getFullYear()}-${String(h.date.getMonth()+1).padStart(2,'0')}`;
         if (!histoByMonth[key]) histoByMonth[key] = { val: 0, inv: 0, sources: new Set(), date: h.date };
-        histoByMonth[key].val += h.val;
-        histoByMonth[key].inv += h.inv;
+        histoByMonth[key].val += val;
+        histoByMonth[key].inv += inv;
         histoByMonth[key].sources.add(tabName);
       });
     };
