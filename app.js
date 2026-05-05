@@ -931,9 +931,14 @@ function renderPeriodPnl(period, total) {
   if (histo.length >= 2 && ['YTD','1A','TOUT','3M','1M'].includes(period)) {
     const filtered = filterHistoByPeriod(histo, period).filter(h => h.val > 0);
     if (filtered.length >= 2) {
-      const startVal = filtered[0].val;
-      const endVal   = filtered[filtered.length - 1].val;
-      if (startVal > 0) {
+      const startPoint = filtered[0];
+      const endPoint   = filtered[filtered.length - 1];
+      // Use the actual current total (passed in) as endVal for the most recent period
+      // This avoids stale histo data vs current asset values
+      const isCurrentPeriod = endPoint === filtered[filtered.length - 1];
+      const startVal = startPoint.val;
+      const endVal   = total > 0 ? total : endPoint.val; // prefer live total
+      if (startVal > 0 && endVal > 0) {
         periodPnl = endVal - startVal;
         periodPct = (periodPnl / startVal) * 100;
       }
@@ -1858,19 +1863,24 @@ async function connectSheets(silent = false) {
       return { date: dateObj, val: rawVal, inv: rawInv };
     };
 
+    // Track which sources have data to know how many are active
     const histoByMonth = {};
+    const activeSources = new Set();
 
     const addToHisto = (rows, tabName) => {
       if (!rows) return;
+      let hasData = false;
       rows.slice(1).forEach(row => {
         const h = parseHistoRow(row);
-        if (!h) return; // skips future/empty rows
+        if (!h) return;
+        hasData = true;
         const key = `${h.date.getFullYear()}-${String(h.date.getMonth()+1).padStart(2,'0')}`;
         if (!histoByMonth[key]) histoByMonth[key] = { val: 0, inv: 0, sources: new Set(), date: h.date };
         histoByMonth[key].val += h.val;
         histoByMonth[key].inv += h.inv;
         histoByMonth[key].sources.add(tabName);
       });
+      if (hasData) activeSources.add(tabName);
     };
 
     // Onglet "Suivi patrimoine" = tableau statique par catégorie (CTO, AIRBUS, Crypto...) — pas une série temporelle
@@ -1883,9 +1893,11 @@ async function connectSheets(silent = false) {
     addToHisto(suiviAirbusRows, 'Airbus');
     addToHisto(suiviCryptoRows, 'Crypto');
 
-    // Sort and store history
+    // Only keep months where ALL active sources contributed — avoids partial/wrong totals
+    const nSources = activeSources.size || 1;
     const histoPoints = Object.entries(histoByMonth)
       .sort(([a], [b]) => a.localeCompare(b))
+      .filter(([, v]) => v.sources.size >= nSources) // all sources must be present
       .map(([key, v]) => ({ key, date: v.date, val: v.val, inv: v.inv }));
 
     if (histoPoints.length > 1) {
