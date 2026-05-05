@@ -984,6 +984,19 @@
       <div class="topbar-right">
         <span class="last-update" id="lastUpdate">–</span>
         <span id="syncIndicator" style="font-size:11px;color:var(--green);opacity:0;transition:opacity 0.5s;margin-right:4px;" title="Données synchronisées avec le cloud">☁ Sync</span>
+        <!-- Auto-sync countdown + sélecteur -->
+        <div style="display:flex;align-items:center;gap:4px;">
+          <span id="syncCountdown" style="font-size:11px;color:var(--muted2);min-width:44px;text-align:right;" title="Prochain sync automatique"></span>
+          <select onchange="setSyncInterval(this.value)" id="syncIntervalSelect"
+            style="background:var(--surface2);border:1px solid var(--border2);border-radius:6px;color:var(--text);font-size:10px;padding:3px 6px;cursor:pointer;outline:none;font-family:inherit;"
+            title="Fréquence de synchronisation automatique">
+            <option value="5">5 min</option>
+            <option value="15" selected>15 min</option>
+            <option value="30">30 min</option>
+            <option value="60">1h</option>
+            <option value="0">Manuel</option>
+          </select>
+        </div>
         <button id="themeToggleBtn" class="refresh-btn" onclick="toggleTheme()" title="Changer de thème" style="font-size:16px;padding:7px 10px;">🌙</button>
         <button class="refresh-btn" onclick="refreshData()">↻ Actualiser</button>
         <button class="btn btn-accent" onclick="openModal('addAsset')" style="font-size:12px;padding:7px 14px;">+ Ajouter</button>
