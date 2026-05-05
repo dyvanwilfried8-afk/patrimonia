@@ -135,6 +135,14 @@ async function initApp() {
     updateProjection();
     autoFillFiscalFromSalary();
     renderDisconnectButtons();
+
+    // Démarrer l'auto-sync si credentials disponibles
+    if (localStorage.getItem('patrimonia_sheets_id') && localStorage.getItem('patrimonia_sheets_key')) {
+      startAutoSync();
+      // Restore select value
+      const sel = document.getElementById('syncIntervalSelect');
+      if (sel) sel.value = getSyncInterval().toString();
+    }
     const now = new Date();
     safeSet('lastUpdate', now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }));
   } catch (err) {
@@ -150,11 +158,116 @@ async function logout() { await sb.auth.signOut(); window.location.href = 'index
 
 async function refreshData() {
   safeSet('lastUpdate', 'Actualisation...');
-  loadLocalData(); initOverview();
+  // Si credentials Google Sheets dispo → re-import complet
+  const sheetId = localStorage.getItem('patrimonia_sheets_id');
+  const apiKey  = localStorage.getItem('patrimonia_sheets_key');
+  if (sheetId && apiKey) {
+    await silentSheetsSync(sheetId, apiKey);
+  } else {
+    loadLocalData();
+    initOverview();
+  }
   autoFillFiscalFromSalary();
   safeSet('lastUpdate', new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }));
   showToast('Actualisé ✓', '#22c55e');
 }
+
+// ─── AUTO-SYNC GOOGLE SHEETS ─────────────────────────────────────────────────
+
+let _autoSyncInterval  = null;
+let _autoSyncCountdown = null;
+let _syncSecondsLeft   = 0;
+
+const AUTO_SYNC_INTERVALS = {
+  '5':  5  * 60,
+  '15': 15 * 60,
+  '30': 30 * 60,
+  '60': 60 * 60,
+  '0':  0,  // désactivé
+};
+
+function getSyncInterval() {
+  return parseInt(localStorage.getItem('patrimonia_sync_interval') || '15');
+}
+
+function startAutoSync() {
+  stopAutoSync();
+  const mins = getSyncInterval();
+  if (!mins) return; // désactivé
+  const secs = mins * 60;
+  _syncSecondsLeft = secs;
+  updateSyncBadge();
+
+  // Countdown chaque seconde
+  _autoSyncCountdown = setInterval(() => {
+    _syncSecondsLeft = Math.max(0, _syncSecondsLeft - 1);
+    updateSyncBadge();
+  }, 1000);
+
+  // Sync effective
+  _autoSyncInterval = setInterval(async () => {
+    const sid = localStorage.getItem('patrimonia_sheets_id');
+    const key = localStorage.getItem('patrimonia_sheets_key');
+    if (!sid || !key) { stopAutoSync(); return; }
+    await silentSheetsSync(sid, key);
+    _syncSecondsLeft = secs;
+  }, secs * 1000);
+}
+
+function stopAutoSync() {
+  clearInterval(_autoSyncInterval);
+  clearInterval(_autoSyncCountdown);
+  _autoSyncInterval = _autoSyncCountdown = null;
+  updateSyncBadge();
+}
+
+function updateSyncBadge() {
+  const el = document.getElementById('syncCountdown');
+  if (!el) return;
+  const mins = getSyncInterval();
+  if (!mins || !_autoSyncInterval) {
+    el.textContent = '';
+    el.title = 'Auto-sync désactivé';
+    return;
+  }
+  const m = Math.floor(_syncSecondsLeft / 60);
+  const s = _syncSecondsLeft % 60;
+  const label = m > 0 ? `${m}m${s > 0 ? s + 's' : ''}` : `${s}s`;
+  el.textContent = `↻ ${label}`;
+  el.title = `Prochain sync dans ${label}`;
+}
+
+function setSyncInterval(mins) {
+  localStorage.setItem('patrimonia_sync_interval', mins);
+  if (mins === '0' || mins === 0) {
+    stopAutoSync();
+    showToast('Auto-sync désactivé', '#f59e0b');
+  } else {
+    startAutoSync();
+    showToast(`Auto-sync toutes les ${mins} min ✓`, '#22c55e');
+  }
+}
+
+// Sync silencieux — re-importe les données du Sheet sans toast ni loader
+async function silentSheetsSync(sheetId, apiKey) {
+  try {
+    const keyEl = document.getElementById('sheetsApiKey');
+    const urlEl = document.getElementById('sheetsUrl');
+    const origKey = keyEl?.value;
+    const origUrl = urlEl?.value;
+
+    if (keyEl) keyEl.value = apiKey;
+    if (urlEl) urlEl.value = `https://docs.google.com/spreadsheets/d/${sheetId}`;
+
+    await connectSheets(true);
+
+    if (keyEl) keyEl.value = origKey || '';
+    if (urlEl) urlEl.value = origUrl || '';
+
+    safeSet('lastUpdate', new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }));
+  } catch(e) { console.warn('Auto-sync failed:', e.message); }
+}
+
 
 // ─── DONNÉES LOCALES ────────────────────────────────────────────────────
 
@@ -1425,7 +1538,7 @@ function addAsset() {
 
 // ─── CONNEXIONS ──────────────────────────────────────────────────────────
 
-async function connectSheets() {
+async function connectSheets(silent = false) {
   const apiKey = document.getElementById('sheetsApiKey')?.value?.trim();
   const url    = document.getElementById('sheetsUrl')?.value?.trim();
   if (!apiKey || !url) return showToast('Clé API et URL requis', '#ef4444');
@@ -1711,14 +1824,26 @@ async function connectSheets() {
     if (statusEl) { statusEl.textContent='Connecté'; statusEl.className='badge badge-up'; }
     const det = document.getElementById('dashboardDetected');
     if (det) det.style.display='block';
-    showToast(imported+' actifs import\u00E9s \u2713', '#22c55e');
+
+    // ── Sauvegarder les credentials pour l'auto-sync (seulement import manuel) ──
+    if (!silent) {
+      localStorage.setItem('patrimonia_sheets_id',  sheetId);
+      localStorage.setItem('patrimonia_sheets_key', apiKey);
+      startAutoSync();
+      showToast(imported+' actifs importés ✓', '#22c55e');
+    } else {
+      // Sync silencieux : juste mettre à jour le badge
+      const ind = document.getElementById('syncIndicator');
+      if (ind) { ind.textContent = '☁ Synced'; ind.style.opacity = '1'; setTimeout(() => ind.style.opacity = '0', 2000); }
+    }
     autoFillFiscalFromSalary();
     renderDisconnectButtons();
 
   } catch(err) {
-    showToast('Erreur : '+err.message, '#ef4444'); console.error(err);
+    if (!silent) showToast('Erreur : '+err.message, '#ef4444');
+    console.error(err);
   } finally {
-    if (btn) btn.textContent='\u2B07 Importer mon Google Sheet';
+    if (!silent && btn) btn.textContent='\u2B07 Importer mon Google Sheet';
   }
 }
 
@@ -1789,12 +1914,15 @@ function disconnectSource(sourcePrefix, labelName) {
     const el = document.getElementById(statusMap[key]);
     if (el) { el.textContent = 'Non connecté'; el.className = 'badge badge-neutral'; }
   }
-  // Hide detected badge for sheets + clear historical data
+  // Hide detected badge for sheets + clear historical data + credentials
   if (sourcePrefix === 'sheets') {
     const det = document.getElementById('dashboardDetected');
     if (det) det.style.display = 'none';
     localStorage.removeItem('patrimonia_histo');
     localStorage.removeItem('patrimonia_dividends');
+    localStorage.removeItem('patrimonia_sheets_id');
+    localStorage.removeItem('patrimonia_sheets_key');
+    stopAutoSync();
   }
   showToast(`${removed} actif(s) supprimé(s) — ${labelName} déconnecté`, '#f59e0b');
   renderDisconnectButtons();
