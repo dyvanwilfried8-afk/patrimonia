@@ -906,6 +906,19 @@
     .exemption-banner { background:rgba(34,197,94,0.06); border:1px solid rgba(34,197,94,0.2); border-radius:8px; padding:12px 16px; margin-bottom:16px; display:none; }
     .exemption-banner.visible { display:block; }
     .chart-wrap-sm { position:relative; height:160px; }
+
+    /* ── PERIOD PERF CARDS ── */
+    #periodPerfCards > div {
+      animation: perfCardIn 0.3s ease both;
+    }
+    #periodPerfCards > div:nth-child(1) { animation-delay: 0.00s; }
+    #periodPerfCards > div:nth-child(2) { animation-delay: 0.05s; }
+    #periodPerfCards > div:nth-child(3) { animation-delay: 0.10s; }
+    #periodPerfCards > div:nth-child(4) { animation-delay: 0.15s; }
+    @keyframes perfCardIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
   </style>
 </head>
 <body>
@@ -1045,6 +1058,9 @@
             <div style="position:relative;height:180px;margin:12px 0 0;width:100%;">
               <canvas id="chartHistorique" style="display:block;width:100%;height:180px;"></canvas>
             </div>
+
+            <!-- ── Mini-cartes perf par catégorie — réactives à la période ── -->
+            <div id="periodPerfCards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-top:14px;"></div>
           </div>
 
           <!-- ── COL DROITE : Performance YTD + Donut ── -->
