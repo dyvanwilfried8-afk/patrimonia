@@ -419,6 +419,7 @@ function initOverview() {
   renderCategoryCards(totalAssets, totalSav, total);
   renderPnlStats(totalAssets);
   renderPeriodPnl(currentHistoPeriod, total);
+  renderPeriodCategoryCards(currentHistoPeriod);
   renderBudgetWidget();
   renderBestWorst();
   renderHistoChart(total);
@@ -914,6 +915,7 @@ function setHistoPeriod(period, btn) {
   const total    = showSavingsInTotal ? totalAssets + totalSav : totalAssets;
   renderHistoChart(total);
   renderPeriodPnl(period, total);
+  renderPeriodCategoryCards(period);
 }
 
 // Render P&L inline + performance panel based on selected period
@@ -991,6 +993,216 @@ function renderPeriodPnl(period, total) {
   const perfLabelEl = document.querySelector('#kpi-pnl')?.closest('.panel')?.querySelector('[id*="perf-period-label"], .perf-period-label');
   safeSet('perfPeriodLabel', periodLabels[period] || 'Période sélectionnée');
 }
+
+// ─── MINI-CARTES PERF PAR CATÉGORIE (réactives à la période) ──────────────
+
+function renderPeriodCategoryCards(period) {
+  const el = document.getElementById('periodPerfCards');
+  if (!el) return;
+
+  if (!assets.length) { el.innerHTML = ''; return; }
+
+  // Map période → champ de performance sur les assets
+  const perfFieldMap = {
+    '1J':  'perf1d',
+    '7J':  'perfW',
+    '1M':  'perfM',
+    '3M':  'perfM',   // fallback sur 1M si pas de champ 3M
+    'YTD': 'perfYtd',
+    '1A':  'perfYtd',
+    'TOUT':'perfTotal',
+  };
+  const perfField = perfFieldMap[period] || 'perfYtd';
+
+  // Labels lisibles
+  const periodLabels = {
+    '1J':'Aujourd\'hui', '7J':'7 jours', '1M':'1 mois',
+    '3M':'3 mois', 'YTD':'Depuis jan.', '1A':'1 an', 'TOUT':'Total',
+  };
+
+  // Définition des catégories avec leurs sources/types
+  // On reflète exactement ce qu'on voit dans l'image : CTO, Airbus PEG, Airbus Percol, Cryptos
+  const cats = [
+    {
+      id:    'cto',
+      label: 'CTO',
+      color: '#3b82f6',
+      filter: a => a.source === 'sheets-cto' && a.ticker !== 'EPA:AIR',
+    },
+    {
+      id:    'peg',
+      label: 'Airbus PEG',
+      color: '#a78bfa',
+      filter: a => a.source === 'sheets-airbus' && (a.enveloppe === 'PEG' || (a.enveloppe||'').toUpperCase() === 'PEG'),
+    },
+    {
+      id:    'percol',
+      label: 'Airbus Percol',
+      color: '#f59e0b',
+      filter: a => a.source === 'sheets-airbus' && (a.enveloppe === 'PERCOL' || (a.enveloppe||'').toUpperCase() === 'PERCOL'),
+    },
+    {
+      id:    'crypto',
+      label: 'Cryptos',
+      color: '#22c55e',
+      filter: a => a.type === 'crypto',
+    },
+  ];
+
+  // Fallback : si pas de source sheets-airbus, on regroupe tout l'ESOP ensemble
+  const hasAirbus = assets.some(a => a.source === 'sheets-airbus');
+  const hasCTO    = assets.some(a => a.source === 'sheets-cto');
+  const hasCrypto = assets.some(a => a.type === 'crypto');
+
+  // Construire les catégories dynamiquement selon ce qui existe
+  const activeCats = [];
+
+  if (hasCTO) {
+    activeCats.push({
+      id: 'cto', label: 'CTO', color: '#3b82f6',
+      filter: a => a.source === 'sheets-cto' && a.ticker !== 'EPA:AIR',
+    });
+  }
+
+  if (hasAirbus) {
+    // Détecter les enveloppes disponibles
+    const enveloppes = [...new Set(assets.filter(a => a.source === 'sheets-airbus').map(a => (a.enveloppe||'').toUpperCase()))].filter(Boolean);
+    if (enveloppes.includes('PEG')) {
+      activeCats.push({
+        id: 'peg', label: 'Airbus PEG', color: '#a78bfa',
+        filter: a => a.source === 'sheets-airbus' && (a.enveloppe||'').toUpperCase() === 'PEG',
+      });
+    }
+    if (enveloppes.includes('PERCOL')) {
+      activeCats.push({
+        id: 'percol', label: 'Airbus Percol', color: '#f59e0b',
+        filter: a => a.source === 'sheets-airbus' && (a.enveloppe||'').toUpperCase() === 'PERCOL',
+      });
+    }
+    // Si enveloppes non détectées mais ESOP présent
+    if (!enveloppes.includes('PEG') && !enveloppes.includes('PERCOL')) {
+      activeCats.push({
+        id: 'esop', label: 'ESOP / PER', color: '#a78bfa',
+        filter: a => a.type === 'esop',
+      });
+    }
+  } else {
+    // Pas de sheets-airbus → grouper tous les ESOP
+    const hasEsop = assets.some(a => a.type === 'esop');
+    if (hasEsop) {
+      activeCats.push({
+        id: 'esop', label: 'ESOP / PER', color: '#a78bfa',
+        filter: a => a.type === 'esop',
+      });
+    }
+  }
+
+  if (hasCrypto) {
+    activeCats.push({
+      id: 'crypto', label: 'Cryptos', color: '#22c55e',
+      filter: a => a.type === 'crypto',
+    });
+  }
+
+  // Fallback générique si aucune catégorie détectée
+  if (!activeCats.length) {
+    activeCats.push({
+      id: 'all', label: 'Portefeuille', color: '#3b82f6',
+      filter: a => true,
+    });
+  }
+
+  // Histo points for data-driven P&L
+  const histo = loadHistoPoints();
+
+  // Calculer P&L période pour chaque catégorie
+  const results = activeCats.map(cat => {
+    const catAssets = assets.filter(cat.filter);
+    if (!catAssets.length) return null;
+
+    const totalVal  = catAssets.reduce((s, a) => s + assetValue(a), 0);
+    const totalCost = catAssets.reduce((s, a) => s + assetCost(a), 0);
+
+    // Calcul P&L période via les champs perf* des assets (le plus fiable)
+    let periodPnl = 0;
+    let periodPct = 0;
+    let hasPerf = false;
+
+    catAssets.forEach(a => {
+      const pctRaw = a[perfField];
+      if (pctRaw && !isNaN(pctRaw) && pctRaw !== 0) {
+        const val = assetValue(a);
+        const pct = normalizePct(pctRaw) / 100;
+        // val = val_avant * (1 + pct) → delta = val - val/(1+pct)
+        periodPnl += val - val / (1 + pct);
+        hasPerf = true;
+      }
+    });
+
+    // Si période TOUT → utiliser P&L total (val - cost)
+    if (period === 'TOUT') {
+      periodPnl = totalVal - totalCost;
+      hasPerf   = totalCost > 0;
+    }
+
+    // Calcul % sur la base de la valeur avant la période
+    if (hasPerf) {
+      const valBefore = totalVal - periodPnl;
+      periodPct = valBefore > 0 ? (periodPnl / valBefore) * 100 : 0;
+    }
+
+    return {
+      ...cat,
+      totalVal,
+      periodPnl,
+      periodPct,
+      hasPerf,
+    };
+  }).filter(Boolean).filter(c => c.totalVal > 0);
+
+  if (!results.length) { el.innerHTML = ''; return; }
+
+  // Rendu des cartes
+  el.innerHTML = results.map(cat => {
+    const sign  = cat.periodPnl >= 0 ? '+' : '';
+    const color = cat.periodPnl >= 0 ? '#22c55e' : '#ef4444';
+    const bgCol = cat.periodPnl >= 0 ? 'rgba(34,197,94,0.06)' : 'rgba(239,68,68,0.06)';
+    const bdCol = cat.periodPnl >= 0 ? 'rgba(34,197,94,0.18)' : 'rgba(239,68,68,0.18)';
+    const pctStr = cat.hasPerf ? `${sign}${cat.periodPct.toFixed(2)}%` : '–';
+    const eurStr = cat.hasPerf ? `${sign}${fmt.format(cat.periodPnl)}` : '–';
+
+    return `<div style="
+      background:${bgCol};
+      border:1px solid ${bdCol};
+      border-radius:10px;
+      padding:12px 14px;
+      cursor:pointer;
+      transition:all 0.2s;
+      position:relative;
+      overflow:hidden;
+    " onclick="navigate('portfolio')"
+       onmouseover="this.style.borderColor='${cat.color}40';this.style.background='${bgCol.replace('0.06','0.1')}'"
+       onmouseout="this.style.borderColor='${bdCol}';this.style.background='${bgCol}'">
+
+      <!-- Barre colorée en haut -->
+      <div style="position:absolute;top:0;left:0;right:0;height:2px;background:${cat.color};border-radius:10px 10px 0 0;"></div>
+
+      <!-- Label -->
+      <div style="font-size:10px;font-weight:600;color:var(--muted2);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px;">${cat.label}</div>
+
+      <!-- Valeur totale -->
+      <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px;letter-spacing:-0.3px;">${fmt.format(cat.totalVal)}</div>
+
+      <!-- P&L période -->
+      <div style="font-size:16px;font-weight:700;color:${color};letter-spacing:-0.5px;line-height:1.1;">${pctStr}</div>
+      <div style="font-size:10px;color:${color};opacity:0.8;margin-top:2px;">${eurStr}</div>
+
+      <!-- Période label -->
+      <div style="font-size:9px;color:var(--muted);margin-top:6px;text-transform:uppercase;letter-spacing:0.5px;">${periodLabels[period] || period}</div>
+    </div>`;
+  }).join('');
+}
+
 
 // ─── PORTEFEUILLE ────────────────────────────────────────────────────────
 
