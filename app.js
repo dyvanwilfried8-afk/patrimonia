@@ -419,7 +419,6 @@ function initOverview() {
   renderCategoryCards(totalAssets, totalSav, total);
   renderPnlStats(totalAssets);
   renderPeriodPnl(currentHistoPeriod, total);
-  renderPeriodCategoryCards(currentHistoPeriod);
   renderBudgetWidget();
   renderBestWorst();
   renderHistoChart(total);
@@ -610,32 +609,43 @@ function renderDonutChart(catData, total) {
 
 
 function normalizePct(v) {
-  // Normalize: ratio (e.g. 0.476) or already % (e.g. 47.6)
-  // Daily/weekly moves rarely exceed ±50%, so values between -2 and +2 are treated as ratios
-  // For larger values (like period perfs), values > 2 or < -2 are already in %
+  // ─── RÈGLE UNIQUE ET FIABLE ───────────────────────────────────────────
+  // Le Google Sheet stocke TOUJOURS les perfs déjà en % (ex: 5.64 = +5.64%)
+  // SAUF quand la valeur est en format décimal strict (abs < 0.15 = clairement un ratio)
+  // Ex: 0.0564 → ratio → ×100 = 5.64%
+  // Ex: 5.64   → déjà en %   → 5.64%
+  // Ex: -1.81  → déjà en %   → -1.81%  (NE PAS multiplier — c'est une perf mensuelle normale)
+  // Ex: 32.67  → déjà en %   → 32.67%
+  // Ex: -106   → déjà en %   → -106%   (anormal mais gardé tel quel)
   if (v === undefined || v === null || isNaN(v)) return 0;
-  // If absolute value is very small (< 2) → ratio format → multiply by 100
-  // But if value is like 5.0 or 49.0, it's already in %
-  // Heuristic: sheets mixing both — we treat |v| < 2 as ratio, else as %
-  // Exception: values like -1.18 are ratios (-118%) but also -0.07 = -7%
-  return Math.abs(v) < 2 ? v * 100 : v;
+  // Si valeur absolue < 0.15 → c'est un ratio décimal → convertir
+  if (Math.abs(v) > 0 && Math.abs(v) < 0.15) return v * 100;
+  // Sinon déjà en pourcentage
+  return v;
 }
 
 function renderPnlStats(totalAssets) {
-  // Exclude EPA:AIR from sheets-cto (same double-count exclusion as totalAssets)
+  // ─── SOURCE DE VÉRITÉ : colonnes Investi€ et ValTotale€ du Google Sheet ───
+  // On exclut EPA:AIR de sheets-cto (double-comptage avec sheets-airbus)
   const filteredAssets = assets.filter(a => !(a.source === 'sheets-cto' && a.ticker === 'EPA:AIR'));
 
-  // Use 'investi' field directly from Sheet when available — it's the most accurate
-  // because it includes all deposits over time, not just qty × buyPrice
-  const invested = filteredAssets.reduce((s, a) => s + assetCost(a), 0);
+  // Priorité absolue aux champs du Sheet (investi€ et valTotale€ sont déjà corrects en EUR)
+  // Fallback qty×prix uniquement si le Sheet n'a pas fourni ces colonnes
+  const totalVal = filteredAssets.reduce((s, a) => {
+    if (a.valTotale > 0) return s + a.valTotale;
+    return s + (a.qty || 0) * (a.currentPrice || a.buyPrice || 0);
+  }, 0);
 
-  // Total value also filtered consistently
-  const totalVal = filteredAssets.reduce((s, a) => s + assetValue(a), 0);
-  const savings  = showSavingsInTotal ? window.savings?.reduce((s, sv) => s + (sv.balance || 0), 0) || 0 : 0;
+  const invested = filteredAssets.reduce((s, a) => {
+    if (a.investi > 0) return s + a.investi;
+    return s + (a.qty || 0) * (a.buyPrice || 0);
+  }, 0);
 
-  // P&L = current total (assets + savings if shown) minus invested (assets only — savings have no cost)
-  const pnl    = totalVal + savings - invested;
-  const pnlPct = invested > 0 ? ((totalVal - invested) / invested * 100).toFixed(2) : 0;
+  const savingsTotal = showSavingsInTotal ? window.savings?.reduce((s, sv) => s + (sv.balance || 0), 0) || 0 : 0;
+
+  // P&L = valeur actuelle des actifs - montant investi (épargne hors calcul car sans P&L)
+  const pnl    = totalVal - invested;
+  const pnlPct = invested > 0 ? (pnl / invested * 100).toFixed(2) : 0;
 
   const color = pnl >= 0 ? '#22c55e' : '#ef4444';
   const el = document.getElementById('kpi-pnl');
@@ -672,23 +682,44 @@ function renderPnlStats(totalAssets) {
     };
   }
 
-  // Compute daily/weekly/monthly/YTD P&L from asset period perf fields
-  // Only use assets that actually have period data (non-zero)
-  const computePeriodPnl = (field) => {
+  // ─── P&L PAR PÉRIODE depuis l'historique réel du Sheet ────────────────
+  // Ton "Suivi CTO 2026" a col E = Plus-Value totale (valTotale - investi ce mois)
+  // On peut donc calculer les deltas directement depuis l'histo stocké
+  const histo = loadHistoPoints(); // [{date, val, inv, pv?}]
+
+  const computePeriodFromHisto = (field) => {
+    // field: 'perf1d'|'perfW'|'perfM'|'perfYtd'
+    // Priorité 1 : calculer depuis l'historique réel (plus fiable)
+    if (histo.length >= 2) {
+      const now = new Date();
+      let cutoff = new Date(now);
+      if (field === 'perf1d') cutoff.setDate(now.getDate() - 1);
+      else if (field === 'perfW')   cutoff.setDate(now.getDate() - 7);
+      else if (field === 'perfM')   cutoff.setMonth(now.getMonth() - 1);
+      else if (field === 'perfYtd') cutoff = new Date(now.getFullYear(), 0, 1);
+      const validPoints = histo.filter(h => h.val > 0);
+      const beforePoints = validPoints.filter(h => new Date(h.date) <= cutoff);
+      if (beforePoints.length > 0) {
+        const startPoint = beforePoints[beforePoints.length - 1];
+        const currentVal = totalVal + savingsTotal;
+        const delta = currentVal - startPoint.val;
+        return delta;
+      }
+    }
+    // Priorité 2 : fallback sur les perfs du Sheet par actif
     return filteredAssets.reduce((s, a) => {
-      const val = assetValue(a);
+      const val = a.valTotale > 0 ? a.valTotale : (a.qty||0)*(a.currentPrice||0);
       const pctRaw = a[field];
       if (!pctRaw || isNaN(pctRaw) || pctRaw === 0) return s;
       const pct = normalizePct(pctRaw) / 100;
-      // val_before = val / (1 + pct), delta = val - val_before
       return s + (val - val / (1 + pct));
     }, 0);
   };
 
-  const d1Val  = computePeriodPnl('perf1d');
-  const w1Val  = computePeriodPnl('perfW');
-  const m1Val  = computePeriodPnl('perfM');
-  const ytdVal = computePeriodPnl('perfYtd');
+  const d1Val  = computePeriodFromHisto('perf1d');
+  const w1Val  = computePeriodFromHisto('perfW');
+  const m1Val  = computePeriodFromHisto('perfM');
+  const ytdVal = computePeriodFromHisto('perfYtd');
 
   [['statD1', d1Val], ['statW1', w1Val], ['statM1', m1Val], ['statYtd', ytdVal]].forEach(([id, v]) => {
     const e = document.getElementById(id);
@@ -779,71 +810,65 @@ function renderHistoChart(total) {
   if (chartHistoInstance) chartHistoInstance.destroy();
 
   const now = new Date();
-  const histoRaw = loadHistoPoints();
+  const histoRaw = loadHistoPoints().filter(h => h.val > 0);
 
-  // ── Build curve from REAL historical data if available ──
+  // ─── Courbe depuis données réelles du Sheet ─────────────────────────────
   const buildRealCurve = (period) => {
-    const filtered = filterHistoByPeriod(histoRaw, period).filter(h => h.val > 0);
+    const filtered = filterHistoByPeriod(histoRaw, period);
     if (filtered.length < 2) return null;
 
-    const labels = filtered.map(h => {
+    const labels   = filtered.map(h => {
       const d = new Date(h.date);
       return d.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
     });
-    const data = filtered.map(h => Math.round(h.val));
+    const dataVal  = filtered.map(h => Math.round(h.val));
+    const dataInv  = filtered.map(h => h.inv > 0 ? Math.round(h.inv) : null);
+    const dataPv   = filtered.map(h => h.pv !== undefined ? Math.round(h.pv) : null);
 
-    // Append current total as last point if it differs from last stored point
-    const lastStored = data[data.length - 1];
+    // Ajouter le point courant si différent du dernier point stocké
+    const lastStored = dataVal[dataVal.length - 1];
     if (Math.abs(lastStored - total) > 50) {
-      labels.push(now.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' }));
-      data.push(Math.round(total));
+      labels.push('Auj.');
+      dataVal.push(Math.round(total));
+      dataInv.push(dataInv[dataInv.length - 1]); // extrapoler investi
+      dataPv.push(null);
     }
-    return { labels, data };
+    return { labels, dataVal, dataInv };
   };
 
-  // ── Fallback: estimate curve from period performance fields ──
+  // ─── Courbe estimée si pas d'historique ─────────────────────────────────
   const buildEstimCurve = (pts, monthsBack, perfField) => {
-    const labels = [], data = [];
-    const assetsWithPerf = assets.filter(a => {
+    const labels = [], dataVal = [], dataInv = [];
+    const filteredAssets = assets.filter(a => !(a.source === 'sheets-cto' && a.ticker === 'EPA:AIR'));
+    const assetsWithPerf = filteredAssets.filter(a => {
       const v = a[perfField];
       return v !== undefined && v !== null && !isNaN(v) && v !== 0;
     });
-    let totalPeriodPnl;
-    if (assetsWithPerf.length > 0) {
-      totalPeriodPnl = assetsWithPerf.reduce((s, a) => {
-        const val = assetValue(a);
-        const pct = normalizePct(a[perfField]) / 100;
-        return s + (val - val / (1 + pct));
-      }, 0);
-    } else {
-      const totalCost = assets
-        .filter(a => !(a.source === 'sheets-cto' && a.ticker === 'EPA:AIR'))
-        .reduce((s, a) => s + assetCost(a), 0);
-      totalPeriodPnl = total - totalCost - (showSavingsInTotal ? savings.reduce((s,sv)=>s+(sv.balance||0),0) : 0);
-    }
+    let totalPeriodPnl = assetsWithPerf.length > 0
+      ? assetsWithPerf.reduce((s, a) => {
+          const val = a.valTotale > 0 ? a.valTotale : (a.qty||0)*(a.currentPrice||0);
+          const pct = normalizePct(a[perfField]) / 100;
+          return s + (val - val / (1 + pct));
+        }, 0)
+      : 0;
     const startVal = Math.max(0, total - totalPeriodPnl);
+    const invested = filteredAssets.reduce((s,a) => s + (a.investi > 0 ? a.investi : (a.qty||0)*(a.buyPrice||0)), 0);
 
     for (let i = pts; i >= 0; i--) {
       const d = new Date(now);
-      const daysBack = Math.round(i * (monthsBack * 30) / pts);
-      d.setDate(d.getDate() - daysBack);
-      if (monthsBack <= 1) {
-        labels.push(d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }));
-      } else {
-        labels.push(d.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' }));
-      }
-      const t = 1 - i / pts;
-      const eased = t < 0.5 ? 2*t*t : -1+(4-2*t)*t;
-      data.push(Math.round(startVal + (total - startVal) * eased));
+      d.setDate(d.getDate() - Math.round(i * (monthsBack * 30) / pts));
+      labels.push(d.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' }));
+      const tt = 1 - i / pts;
+      const eased = tt < 0.5 ? 2*tt*tt : -1+(4-2*tt)*tt;
+      dataVal.push(Math.round(startVal + (total - startVal) * eased));
+      dataInv.push(Math.round(invested));
     }
-    data[data.length - 1] = total;
-    return { labels, data };
+    dataVal[dataVal.length - 1] = total;
+    return { labels, dataVal, dataInv };
   };
 
-  let curve;
-  // Try real data first for monthly/long periods
   const realCurve = buildRealCurve(currentHistoPeriod);
-
+  let curve;
   if (realCurve && ['YTD','1A','TOUT','3M','1M'].includes(currentHistoPeriod)) {
     curve = realCurve;
   } else {
@@ -853,52 +878,89 @@ function renderHistoChart(total) {
       case '1M':   curve = realCurve || buildEstimCurve(30, 1, 'perfM');   break;
       case '3M':   curve = realCurve || buildEstimCurve(12, 3, 'perfM');   break;
       case 'YTD': {
-        const monthsSinceJan = now.getMonth() + now.getDate()/30;
-        curve = realCurve || buildEstimCurve(Math.max(6, Math.round(monthsSinceJan * 4)), monthsSinceJan, 'perfYtd');
+        const ms = now.getMonth() + now.getDate()/30;
+        curve = realCurve || buildEstimCurve(Math.max(6, Math.round(ms*4)), ms, 'perfYtd');
         break;
       }
-      case '1A':   curve = realCurve || buildEstimCurve(12, 12, 'perfYtd');  break;
-      case 'TOUT': curve = realCurve || buildEstimCurve(24, 24, 'perfYtd');  break;
-      default:     curve = realCurve || buildEstimCurve(12, 12, 'perfYtd');  break;
+      case '1A':   curve = realCurve || buildEstimCurve(12, 12, 'perfYtd'); break;
+      case 'TOUT': curve = realCurve || buildEstimCurve(24, 24, 'perfYtd'); break;
+      default:     curve = realCurve || buildEstimCurve(12, 12, 'perfYtd'); break;
     }
   }
 
-  // Source indicator — show badge if using real data
-  const dateLabel = document.getElementById('overviewDateLabel');
-  if (dateLabel) {
-    const usingReal = realCurve && ['YTD','1A','TOUT','3M','1M'].includes(currentHistoPeriod);
-    dateLabel.innerHTML = `Patrimoine brut ${usingReal ? '<span style="font-size:10px;color:var(--green);margin-left:6px;">● Historique réel</span>' : ''}`;
-  }
-
-  // Determine chart color
-  const isUp = curve.data[curve.data.length-1] >= curve.data[0];
+  const isUp = curve.dataVal[curve.dataVal.length-1] >= curve.dataVal[0];
   const lineColor = isUp ? '#3b82f6' : '#ef4444';
   const fillColor = isUp ? 'rgba(59,130,246,0.08)' : 'rgba(239,68,68,0.06)';
+  const hasInvested = curve.dataInv && curve.dataInv.some(v => v > 0);
+
+  const datasets = [
+    {
+      label: 'Valeur portefeuille',
+      data: curve.dataVal,
+      borderColor: lineColor,
+      backgroundColor: fillColor,
+      fill: true,
+      tension: 0.4,
+      pointRadius: 0,
+      borderWidth: 2,
+    }
+  ];
+
+  // Ajouter la courbe "Investi" si on a des données réelles (= ça montre l'effet DCA)
+  if (hasInvested && realCurve) {
+    datasets.push({
+      label: 'Capital investi',
+      data: curve.dataInv,
+      borderColor: 'rgba(148,163,184,0.5)',
+      backgroundColor: 'transparent',
+      fill: false,
+      tension: 0.1,
+      pointRadius: 0,
+      borderWidth: 1.5,
+      borderDash: [4, 4],
+    });
+  }
+
+  const gridCol = getComputedStyle(document.documentElement).getPropertyValue('--border') || 'rgba(255,255,255,0.06)';
+  const mutedCol = getComputedStyle(document.documentElement).getPropertyValue('--muted2') || '#71717a';
 
   chartHistoInstance = new Chart(ctx.getContext('2d'), {
     type: 'line',
-    data: { labels: curve.labels, datasets: [{ data: curve.data, borderColor: lineColor, backgroundColor: fillColor, fill: true, tension: 0.4, pointRadius: 0, borderWidth: 2 }] },
+    data: { labels: curve.labels, datasets },
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false }, tooltip: {
-        callbacks: { label: ctx => fmt.format(ctx.parsed.y) }
-      }},
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: hasInvested && !!realCurve, labels: { color: mutedCol, font: { size: 10 }, boxWidth: 20, padding: 8 } },
+        tooltip: {
+          callbacks: {
+            label: ctx => `${ctx.dataset.label} : ${fmt.format(ctx.parsed.y)}`,
+            afterBody: (items) => {
+              // Afficher le P&L à ce point
+              if (items.length >= 2) {
+                const val = items[0].parsed.y;
+                const inv = items[1].parsed.y;
+                const pv  = val - inv;
+                const pct = inv > 0 ? (pv/inv*100).toFixed(1) : 0;
+                return [`Plus-value : ${pv >= 0 ? '+' : ''}${fmt.format(pv)} (${pct >= 0 ? '+' : ''}${pct}%)`];
+              }
+              return [];
+            }
+          }
+        }
+      },
       scales: {
         y: {
           display: true,
-          position: 'left',
-          grid: { color: (getComputedStyle(document.documentElement).getPropertyValue('--border')||'rgba(255,255,255,0.06)') },
+          grid: { color: gridCol },
           ticks: {
-            color: getComputedStyle(document.documentElement).getPropertyValue('--muted2')||'#71717a',
+            color: mutedCol,
             font: { size: 10 },
             maxTicksLimit: 5,
-            callback: v => {
-              if (v >= 1000) return (v/1000).toFixed(v%1000===0?0:1) + ' k€';
-              return v + ' €';
-            }
+            callback: v => v >= 1000 ? (v/1000).toFixed(1) + ' k€' : v + ' €'
           }
         },
-        x: { grid: { display: false }, ticks: { color: getComputedStyle(document.documentElement).getPropertyValue('--muted2')||'#52525b', font: { size: 10 }, maxTicksLimit: 8 } }
+        x: { grid: { display: false }, ticks: { color: mutedCol, font: { size: 10 }, maxTicksLimit: 8 } }
       }
     }
   });
@@ -910,55 +972,109 @@ function setHistoPeriod(period, btn) {
   btn.classList.add('active');
   const totalAssets = assets
     .filter(a => !(a.source === 'sheets-cto' && a.ticker === 'EPA:AIR'))
-    .reduce((s, a) => s + assetValue(a), 0);
+    .reduce((s, a) => s + (a.valTotale > 0 ? a.valTotale : (a.qty||0)*(a.currentPrice||0)), 0);
   const totalSav = savings.reduce((s, sv) => s + (sv.balance || 0), 0);
   const total    = showSavingsInTotal ? totalAssets + totalSav : totalAssets;
+
+  // Update date label avec indicateur source réelle/estimée
+  const hasRealHisto = loadHistoPoints().filter(h => h.val > 0).length > 1;
+  const dateLabel = document.getElementById('overviewDateLabel');
+  if (dateLabel) {
+    const modeLabel = patrimoineMode === 'net' ? 'Patrimoine net' : patrimoineMode === 'sans-epargne' ? 'Sans épargne' : 'Patrimoine brut';
+    const today = new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
+    dateLabel.innerHTML = `${modeLabel} <span style="color:var(--muted2);font-size:11px;margin-left:6px;">${today}</span>${hasRealHisto ? ' <span style="font-size:10px;color:var(--green);margin-left:4px;">● Données réelles</span>' : ' <span style="font-size:10px;color:var(--muted2);margin-left:4px;">○ Estimé</span>'}`;
+  }
+
   renderHistoChart(total);
   renderPeriodPnl(period, total);
-  renderPeriodCategoryCards(period);
 }
 
 // Render P&L inline + performance panel based on selected period
 function renderPeriodPnl(period, total) {
   const histo = loadHistoPoints();
 
-  // Map period → perf field for live assets
-  const perfFieldMap = { '1J':'perf1d', '7J':'perfW', '1M':'perfM', '3M':'perfM', 'YTD':'perfYtd', '1A':'perfYtd', 'TOUT':'perfYtd' };
-  const perfField = perfFieldMap[period] || 'perfYtd';
+  // ─── SOURCE DE VÉRITÉ : historique réel depuis "Suivi CTO 2026" ────────
+  // Chaque point histo a : { date, val, inv, pv (Plus-Value), perf (Perf Mensuelle%) }
+  //
+  // Pour YTD → comparer point de début d'année au total actuel
+  // Pour 1M  → comparer avant-dernier point au dernier
+  // Pour 7J/1J → pas de données hebdo dans le Sheet mensuel → fallback actifs
 
-  // Try to get period P&L from historical data first
   let periodPnl = null;
   let periodPct = null;
 
-  if (histo.length >= 2 && ['YTD','1A','TOUT','3M','1M'].includes(period)) {
-    const filtered = filterHistoByPeriod(histo, period).filter(h => h.val > 0);
-    if (filtered.length >= 2) {
-      const startPoint = filtered[0];
-      const endPoint   = filtered[filtered.length - 1];
-      // Use the actual current total (passed in) as endVal for the most recent period
-      // This avoids stale histo data vs current asset values
-      const isCurrentPeriod = endPoint === filtered[filtered.length - 1];
-      const startVal = startPoint.val;
-      const endVal   = total > 0 ? total : endPoint.val; // prefer live total
+  const validHisto = histo.filter(h => h.val > 0).sort((a,b) => a.date.localeCompare(b.date));
+
+  if (validHisto.length >= 1) {
+    const now = new Date();
+    let cutoff = null;
+
+    if (period === 'YTD') {
+      cutoff = new Date(now.getFullYear(), 0, 1); // 1er janvier
+    } else if (period === '1A') {
+      cutoff = new Date(now); cutoff.setFullYear(now.getFullYear() - 1);
+    } else if (period === '3M') {
+      cutoff = new Date(now); cutoff.setMonth(now.getMonth() - 3);
+    } else if (period === '1M') {
+      cutoff = new Date(now); cutoff.setMonth(now.getMonth() - 1);
+    } else if (period === 'TOUT') {
+      cutoff = new Date('2000-01-01');
+    }
+
+    if (cutoff) {
+      // Trouver le premier point AVANT la cutoff (= valeur de référence)
+      const cutoffStr = cutoff.toISOString().substring(0, 10);
+      const beforeCutoff = validHisto.filter(h => h.date <= cutoffStr);
+      const refPoint = beforeCutoff.length > 0
+        ? beforeCutoff[beforeCutoff.length - 1]  // dernier point avant cutoff
+        : validHisto[0];                          // sinon le tout premier
+
+      // Valeur de fin = total actuel (live depuis les actifs)
+      const startVal = refPoint.val;
+      const endVal   = total > 0 ? total : validHisto[validHisto.length-1].val;
+
       if (startVal > 0 && endVal > 0) {
-        periodPnl = endVal - startVal;
-        periodPct = (periodPnl / startVal) * 100;
+        // P&L réel = variation valeur - nouveaux apports sur la période
+        // Pour YTD : somme des dépôts depuis le début de l'année
+        let apportsperiode = 0;
+        if (['YTD','1A','3M','1M','TOUT'].includes(period)) {
+          const cutoffStr2 = cutoff.toISOString().substring(0,'2000-01-01'.length);
+          apportsperiode = validHisto
+            .filter(h => h.date > cutoffStr2 && (h.depo || 0) > 0)
+            .reduce((s, h) => s + (h.depo || 0), 0);
+        }
+        // P&L = (valeur finale - valeur initiale) - apports sur la période
+        // = performance pure sans biais DCA
+        const variationBrute = endVal - startVal;
+        periodPnl = variationBrute - apportsperiode;
+        // Pct sur base de départ
+        periodPct = startVal > 0 ? (variationBrute / startVal) * 100 : 0;
+      }
+    } else if (period === '7J' && validHisto.length >= 2) {
+      // Pour 7J : comparer les 2 derniers points mensuels (approximation)
+      const last = validHisto[validHisto.length - 1];
+      const prev = validHisto[validHisto.length - 2];
+      if (last.val > 0 && prev.val > 0) {
+        periodPnl = last.val - prev.val - (last.depo || 0);
+        periodPct = prev.val > 0 ? ((last.val - prev.val) / prev.val) * 100 : 0;
       }
     }
   }
 
-  // Fallback: use asset perf fields
+  // Fallback : utiliser les perfs par actif si pas d'histo
   if (periodPnl === null) {
+    const perfFieldMap = { '1J':'perf1d', '7J':'perfW', '1M':'perfM', '3M':'perfM', 'YTD':'perfYtd', '1A':'perfYtd', 'TOUT':'perfYtd' };
+    const perfField = perfFieldMap[period] || 'perfYtd';
     const filteredAssets = assets.filter(a => !(a.source === 'sheets-cto' && a.ticker === 'EPA:AIR'));
     periodPnl = filteredAssets.reduce((s, a) => {
-      const val = assetValue(a);
+      const val = a.valTotale > 0 ? a.valTotale : (a.qty||0)*(a.currentPrice||0);
       const pctRaw = a[perfField];
       if (!pctRaw || isNaN(pctRaw) || pctRaw === 0) return s;
       const pct = normalizePct(pctRaw) / 100;
       return s + (val - val / (1 + pct));
     }, 0);
-    const totalVal = filteredAssets.reduce((s, a) => s + assetValue(a), 0);
-    const startVal = totalVal - periodPnl;
+    const totalValF = filteredAssets.reduce((s, a) => s + (a.valTotale > 0 ? a.valTotale : (a.qty||0)*(a.currentPrice||0)), 0);
+    const startVal  = totalValF - periodPnl;
     periodPct = startVal > 0 ? (periodPnl / startVal * 100) : 0;
   }
 
@@ -993,216 +1109,6 @@ function renderPeriodPnl(period, total) {
   const perfLabelEl = document.querySelector('#kpi-pnl')?.closest('.panel')?.querySelector('[id*="perf-period-label"], .perf-period-label');
   safeSet('perfPeriodLabel', periodLabels[period] || 'Période sélectionnée');
 }
-
-// ─── MINI-CARTES PERF PAR CATÉGORIE (réactives à la période) ──────────────
-
-function renderPeriodCategoryCards(period) {
-  const el = document.getElementById('periodPerfCards');
-  if (!el) return;
-
-  if (!assets.length) { el.innerHTML = ''; return; }
-
-  // Map période → champ de performance sur les assets
-  const perfFieldMap = {
-    '1J':  'perf1d',
-    '7J':  'perfW',
-    '1M':  'perfM',
-    '3M':  'perfM',   // fallback sur 1M si pas de champ 3M
-    'YTD': 'perfYtd',
-    '1A':  'perfYtd',
-    'TOUT':'perfTotal',
-  };
-  const perfField = perfFieldMap[period] || 'perfYtd';
-
-  // Labels lisibles
-  const periodLabels = {
-    '1J':'Aujourd\'hui', '7J':'7 jours', '1M':'1 mois',
-    '3M':'3 mois', 'YTD':'Depuis jan.', '1A':'1 an', 'TOUT':'Total',
-  };
-
-  // Définition des catégories avec leurs sources/types
-  // On reflète exactement ce qu'on voit dans l'image : CTO, Airbus PEG, Airbus Percol, Cryptos
-  const cats = [
-    {
-      id:    'cto',
-      label: 'CTO',
-      color: '#3b82f6',
-      filter: a => a.source === 'sheets-cto' && a.ticker !== 'EPA:AIR',
-    },
-    {
-      id:    'peg',
-      label: 'Airbus PEG',
-      color: '#a78bfa',
-      filter: a => a.source === 'sheets-airbus' && (a.enveloppe === 'PEG' || (a.enveloppe||'').toUpperCase() === 'PEG'),
-    },
-    {
-      id:    'percol',
-      label: 'Airbus Percol',
-      color: '#f59e0b',
-      filter: a => a.source === 'sheets-airbus' && (a.enveloppe === 'PERCOL' || (a.enveloppe||'').toUpperCase() === 'PERCOL'),
-    },
-    {
-      id:    'crypto',
-      label: 'Cryptos',
-      color: '#22c55e',
-      filter: a => a.type === 'crypto',
-    },
-  ];
-
-  // Fallback : si pas de source sheets-airbus, on regroupe tout l'ESOP ensemble
-  const hasAirbus = assets.some(a => a.source === 'sheets-airbus');
-  const hasCTO    = assets.some(a => a.source === 'sheets-cto');
-  const hasCrypto = assets.some(a => a.type === 'crypto');
-
-  // Construire les catégories dynamiquement selon ce qui existe
-  const activeCats = [];
-
-  if (hasCTO) {
-    activeCats.push({
-      id: 'cto', label: 'CTO', color: '#3b82f6',
-      filter: a => a.source === 'sheets-cto' && a.ticker !== 'EPA:AIR',
-    });
-  }
-
-  if (hasAirbus) {
-    // Détecter les enveloppes disponibles
-    const enveloppes = [...new Set(assets.filter(a => a.source === 'sheets-airbus').map(a => (a.enveloppe||'').toUpperCase()))].filter(Boolean);
-    if (enveloppes.includes('PEG')) {
-      activeCats.push({
-        id: 'peg', label: 'Airbus PEG', color: '#a78bfa',
-        filter: a => a.source === 'sheets-airbus' && (a.enveloppe||'').toUpperCase() === 'PEG',
-      });
-    }
-    if (enveloppes.includes('PERCOL')) {
-      activeCats.push({
-        id: 'percol', label: 'Airbus Percol', color: '#f59e0b',
-        filter: a => a.source === 'sheets-airbus' && (a.enveloppe||'').toUpperCase() === 'PERCOL',
-      });
-    }
-    // Si enveloppes non détectées mais ESOP présent
-    if (!enveloppes.includes('PEG') && !enveloppes.includes('PERCOL')) {
-      activeCats.push({
-        id: 'esop', label: 'ESOP / PER', color: '#a78bfa',
-        filter: a => a.type === 'esop',
-      });
-    }
-  } else {
-    // Pas de sheets-airbus → grouper tous les ESOP
-    const hasEsop = assets.some(a => a.type === 'esop');
-    if (hasEsop) {
-      activeCats.push({
-        id: 'esop', label: 'ESOP / PER', color: '#a78bfa',
-        filter: a => a.type === 'esop',
-      });
-    }
-  }
-
-  if (hasCrypto) {
-    activeCats.push({
-      id: 'crypto', label: 'Cryptos', color: '#22c55e',
-      filter: a => a.type === 'crypto',
-    });
-  }
-
-  // Fallback générique si aucune catégorie détectée
-  if (!activeCats.length) {
-    activeCats.push({
-      id: 'all', label: 'Portefeuille', color: '#3b82f6',
-      filter: a => true,
-    });
-  }
-
-  // Histo points for data-driven P&L
-  const histo = loadHistoPoints();
-
-  // Calculer P&L période pour chaque catégorie
-  const results = activeCats.map(cat => {
-    const catAssets = assets.filter(cat.filter);
-    if (!catAssets.length) return null;
-
-    const totalVal  = catAssets.reduce((s, a) => s + assetValue(a), 0);
-    const totalCost = catAssets.reduce((s, a) => s + assetCost(a), 0);
-
-    // Calcul P&L période via les champs perf* des assets (le plus fiable)
-    let periodPnl = 0;
-    let periodPct = 0;
-    let hasPerf = false;
-
-    catAssets.forEach(a => {
-      const pctRaw = a[perfField];
-      if (pctRaw && !isNaN(pctRaw) && pctRaw !== 0) {
-        const val = assetValue(a);
-        const pct = normalizePct(pctRaw) / 100;
-        // val = val_avant * (1 + pct) → delta = val - val/(1+pct)
-        periodPnl += val - val / (1 + pct);
-        hasPerf = true;
-      }
-    });
-
-    // Si période TOUT → utiliser P&L total (val - cost)
-    if (period === 'TOUT') {
-      periodPnl = totalVal - totalCost;
-      hasPerf   = totalCost > 0;
-    }
-
-    // Calcul % sur la base de la valeur avant la période
-    if (hasPerf) {
-      const valBefore = totalVal - periodPnl;
-      periodPct = valBefore > 0 ? (periodPnl / valBefore) * 100 : 0;
-    }
-
-    return {
-      ...cat,
-      totalVal,
-      periodPnl,
-      periodPct,
-      hasPerf,
-    };
-  }).filter(Boolean).filter(c => c.totalVal > 0);
-
-  if (!results.length) { el.innerHTML = ''; return; }
-
-  // Rendu des cartes
-  el.innerHTML = results.map(cat => {
-    const sign  = cat.periodPnl >= 0 ? '+' : '';
-    const color = cat.periodPnl >= 0 ? '#22c55e' : '#ef4444';
-    const bgCol = cat.periodPnl >= 0 ? 'rgba(34,197,94,0.06)' : 'rgba(239,68,68,0.06)';
-    const bdCol = cat.periodPnl >= 0 ? 'rgba(34,197,94,0.18)' : 'rgba(239,68,68,0.18)';
-    const pctStr = cat.hasPerf ? `${sign}${cat.periodPct.toFixed(2)}%` : '–';
-    const eurStr = cat.hasPerf ? `${sign}${fmt.format(cat.periodPnl)}` : '–';
-
-    return `<div style="
-      background:${bgCol};
-      border:1px solid ${bdCol};
-      border-radius:10px;
-      padding:12px 14px;
-      cursor:pointer;
-      transition:all 0.2s;
-      position:relative;
-      overflow:hidden;
-    " onclick="navigate('portfolio')"
-       onmouseover="this.style.borderColor='${cat.color}40';this.style.background='${bgCol.replace('0.06','0.1')}'"
-       onmouseout="this.style.borderColor='${bdCol}';this.style.background='${bgCol}'">
-
-      <!-- Barre colorée en haut -->
-      <div style="position:absolute;top:0;left:0;right:0;height:2px;background:${cat.color};border-radius:10px 10px 0 0;"></div>
-
-      <!-- Label -->
-      <div style="font-size:10px;font-weight:600;color:var(--muted2);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px;">${cat.label}</div>
-
-      <!-- Valeur totale -->
-      <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px;letter-spacing:-0.3px;">${fmt.format(cat.totalVal)}</div>
-
-      <!-- P&L période -->
-      <div style="font-size:16px;font-weight:700;color:${color};letter-spacing:-0.5px;line-height:1.1;">${pctStr}</div>
-      <div style="font-size:10px;color:${color};opacity:0.8;margin-top:2px;">${eurStr}</div>
-
-      <!-- Période label -->
-      <div style="font-size:9px;color:var(--muted);margin-top:6px;text-transform:uppercase;letter-spacing:0.5px;">${periodLabels[period] || period}</div>
-    </div>`;
-  }).join('');
-}
-
 
 // ─── PORTEFEUILLE ────────────────────────────────────────────────────────
 
@@ -2043,90 +1949,101 @@ async function connectSheets(silent = false) {
       });
     }
 
-    // ─── HISTORIQUE MENSUEL ──────────────────────────────────────────────
-    // Lit "Suivi patrimoine" (vue globale) + onglets Suivi CTO/Airbus/Crypto
-    // Structure attendue : col A=Date, col B=Investi, col C=Valeur Totale
+    // ─── HISTORIQUE MENSUEL — SOURCE UNIQUE : "Suivi CTO 2026" ─────────────
+    // Structure de ton onglet (confirmée par screenshot) :
+    // Col A=Date | B=Investi | C=Valeur Totale | D=Dépôt Mois | E=Plus-Value | F=Perf Mensuelle
+    //
+    // IMPORTANT : on lit UNIQUEMENT "Suivi CTO" comme source globale du patrimoine CTO.
+    // On n'additionne PLUS Airbus + Crypto séparément — ça créait des doublons.
+    // Si tu veux le patrimoine TOTAL (CTO + Airbus + Crypto + Épargne) dans le graphe,
+    // crée un onglet "Suivi Global" avec la même structure, et on le lira en priorité.
 
     const parseHistoRow = (row) => {
       const rawDate = t(row[0]);
-      const rawVal  = p(row[2]);  // col C = Valeur Totale (MUST be > 0 = real data)
-      const rawInv  = p(row[1]);  // col B = Investi
-      // Skip header, totals, and future rows (no Valeur Totale yet)
+      const rawInv  = p(row[1]);  // col B = Investi €
+      const rawVal  = p(row[2]);  // col C = Valeur Totale €
+      const rawDepo = p(row[3]);  // col D = Dépôt Mois €
+      const rawPv   = p(row[4]);  // col E = Plus-Value €
+      const rawPerf = p(row[5]);  // col F = Perf Mensuelle %
+
       if (!rawDate || rawDate.toUpperCase() === 'DATE' || rawDate.toUpperCase() === 'TOTAL') return null;
-      // KEY FIX: only keep rows with a real Valeur Totale — skip future rows with only Investi
+      // Ignorer les lignes sans valeur totale (= mois futurs pas encore remplis)
       if (rawVal <= 0) return null;
 
+      // Parser la date — supporte DD/MM/YYYY, serial Excel, YYYY-MM-DD
       let dateObj = null;
       const serial = parseFloat(rawDate.replace(',', '.'));
       if (!isNaN(serial) && serial > 40000) {
+        // Numéro de série Excel → date
         dateObj = new Date(Math.round((serial - 25569) * 86400 * 1000));
       } else {
-        const parts = rawDate.split(/[\/\-]/);
-        if (parts.length === 3) {
-          if (parts[0].length === 4) dateObj = new Date(parseInt(parts[0]), parseInt(parts[1])-1, parseInt(parts[2]));
-          else dateObj = new Date(parseInt(parts[2]), parseInt(parts[1])-1, parseInt(parts[0]));
+        const parts = rawDate.split(/[\/\-\.]/);
+        if (parts.length >= 3) {
+          const d = parseInt(parts[0]), m = parseInt(parts[1]);
+          let y = parseInt(parts[2]);
+          if (y < 100) y += 2000; // 26 → 2026
+          // DD/MM/YYYY (format français)
+          dateObj = (d > 12) ? new Date(y, m - 1, d) : new Date(y, m - 1, d);
+          // Si ça donne une date invalide, essayer MM/DD/YYYY
+          if (isNaN(dateObj.getTime())) dateObj = new Date(y, d - 1, m);
         }
       }
       if (!dateObj || isNaN(dateObj.getTime())) return null;
+      if (dateObj > new Date()) return null; // ignorer mois futurs
 
-      // Also skip rows dated in the future (beyond today)
-      if (dateObj > new Date()) return null;
-
-      return { date: dateObj, val: rawVal, inv: rawInv };
+      return {
+        date:  dateObj,
+        val:   rawVal,   // Valeur Totale — source de vérité
+        inv:   rawInv,   // Investi cumulé
+        depo:  rawDepo,  // Dépôt du mois (= ta mise DCA)
+        pv:    rawPv,    // Plus-Value absolue (valTotale - investi)
+        perf:  rawPerf,  // Perf mensuelle en % (déjà calculée dans ton Sheet)
+      };
     };
 
-    // Track which sources have data to know how many are active
-    const histoByMonth = {};
-    const activeSources = new Set();
+    // ── Lecture prioritaire : onglet "Suivi Global" si existant, sinon "Suivi CTO 2026" ──
+    let suiviGlobalRows = await fetchTab('Suivi Global');
+    const suiviCtoRows  = await fetchTab('Suivi CTO 2026');
 
-    const addToHisto = (rows, tabName) => {
-      if (!rows) return;
-      let hasData = false;
-      rows.slice(1).forEach(row => {
+    // Source principale : Global > CTO
+    const mainHistoRows = suiviGlobalRows || suiviCtoRows;
+
+    const histoPoints = [];
+    if (mainHistoRows) {
+      mainHistoRows.slice(1).forEach(row => {
         const h = parseHistoRow(row);
         if (!h) return;
-        hasData = true;
-        const key = `${h.date.getFullYear()}-${String(h.date.getMonth()+1).padStart(2,'0')}`;
-        if (!histoByMonth[key]) histoByMonth[key] = { val: 0, inv: 0, sources: new Set(), date: h.date };
-        histoByMonth[key].val += h.val;
-        histoByMonth[key].inv += h.inv;
-        histoByMonth[key].sources.add(tabName);
-      });
-      if (hasData) activeSources.add(tabName);
-    };
-
-    // Onglet "Suivi patrimoine" = tableau statique par catégorie (CTO, AIRBUS, Crypto...) — pas une série temporelle
-    // On utilise les onglets de suivi mensuel pour construire la courbe historique
-    // Onglets de suivi mensuel pour la courbe historique (Epargne exclu pour l'instant)
-    const suiviCtoRows    = await fetchTab('Suivi CTO 2026');
-    const suiviAirbusRows = await fetchTab('Suivi Airbus');
-    const suiviCryptoRows = await fetchTab('Suivi Crypto');
-    addToHisto(suiviCtoRows,    'CTO');
-    addToHisto(suiviAirbusRows, 'Airbus');
-    addToHisto(suiviCryptoRows, 'Crypto');
-
-    // Only keep months where ALL active sources contributed — avoids partial/wrong totals
-    const nSources = activeSources.size || 1;
-    const histoPoints = Object.entries(histoByMonth)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .filter(([, v]) => v.sources.size >= nSources) // all sources must be present
-      .map(([key, v]) => ({ key, date: v.date, val: v.val, inv: v.inv }));
-
-    if (histoPoints.length > 1) {
-      localStorage.setItem('patrimonia_histo', JSON.stringify(
-        histoPoints.map(h => ({
+        histoPoints.push({
           date: h.date.toISOString().substring(0, 10),
           val:  h.val,
           inv:  h.inv,
-        }))
-      ));
+          depo: h.depo,
+          pv:   h.pv,
+          perf: h.perf,
+        });
+      });
+      // Trier par date croissante
+      histoPoints.sort((a, b) => a.date.localeCompare(b.date));
     }
 
+    if (histoPoints.length > 0) {
+      localStorage.setItem('patrimonia_histo', JSON.stringify(histoPoints));
+      console.log(`[Patrimonia] Historique chargé : ${histoPoints.length} points (${histoPoints[0]?.date} → ${histoPoints[histoPoints.length-1]?.date})`);
+    } else {
+      console.warn('[Patrimonia] Aucun point historique trouvé dans "Suivi CTO 2026" ou "Suivi Global"');
+    }
+
+    // ── Optionnel : lire Airbus et Crypto pour un récap — mais NE PAS les ajouter au graphe global ──
+    const suiviAirbusRows = await fetchTab('Suivi Airbus');
+    const suiviCryptoRows = await fetchTab('Suivi Crypto');
+    // (ces données ne sont utilisées que si tu crées un "Suivi Global" séparé)
+
     // DIVIDENDES — "Suivi CTO 2026" col I(8)=Date J(9)=Société K(10)=Montant L(11)=Div/action
-    const suiviRows = await fetchTab('Suivi CTO 2026');
-    if (suiviRows) {
+    // Réutilise suiviCtoRows déjà récupéré (évite une 2ème requête API inutile)
+    const divSourceRows = suiviCtoRows;
+    if (divSourceRows) {
       const divs = [];
-      suiviRows.slice(1).forEach(row => {
+      divSourceRows.slice(1).forEach(row => {
         const societe = t(row[9]); const montant = p(row[10]);
         if (!societe || societe.toUpperCase() === 'TOTAL' || montant <= 0) return;
         const serial = parseFloat(row[8]);
