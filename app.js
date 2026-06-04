@@ -16,15 +16,64 @@ const fmt = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR',
 // ─── THÈME LIGHT/DARK ─────────────────────────────────────────────────
 let currentTheme = localStorage.getItem('patrimonia_theme') || 'dark';
 
+// ─── CSS VARS CACHE ──────────────────────────────────────────────────────
+// getComputedStyle force un recalcul layout — on l'appelle UNE seule fois
+// au changement de thème, et on stocke dans _css pour tous les charts.
+let _css = { muted2: '#71717a', border: 'rgba(255,255,255,0.06)', text: '#f0f2f5', surface: '#111116' };
+
+function _refreshCssCache() {
+  const s = getComputedStyle(document.documentElement);
+  _css = {
+    muted2:  s.getPropertyValue('--muted2').trim()  || '#71717a',
+    muted:   s.getPropertyValue('--muted').trim()   || '#52525b',
+    border:  s.getPropertyValue('--border').trim()  || 'rgba(255,255,255,0.06)',
+    text:    s.getPropertyValue('--text').trim()    || '#f0f2f5',
+    surface: s.getPropertyValue('--surface').trim() || '#111116',
+    green:   s.getPropertyValue('--green').trim()   || '#22c55e',
+    danger:  s.getPropertyValue('--danger').trim()  || '#ef4444',
+    accent:  s.getPropertyValue('--accent').trim()  || '#8b5cf6',
+    accent2: s.getPropertyValue('--accent2').trim() || '#a78bfa',
+  };
+}
+
 function applyTheme(theme) {
   currentTheme = theme;
   document.documentElement.setAttribute('data-theme', theme);
   localStorage.setItem('patrimonia_theme', theme);
   const btn = document.getElementById('themeToggleBtn');
   if (btn) btn.textContent = theme === 'dark' ? '☀' : '☽';
+  // Rafraîchir le cache CSS après changement de thème
+  _refreshCssCache();
 }
 
 function toggleTheme() { applyTheme(currentTheme === 'dark' ? 'light' : 'dark'); }
+
+// ─── BADGE OFFLINE / ONLINE ──────────────────────────────────────────────
+// Informe l'utilisateur en temps réel si la connexion est perdue.
+function _setOfflineBadge(offline) {
+  let badge = document.getElementById('offlineBadge');
+  if (!badge) {
+    badge = document.createElement('div');
+    badge.id = 'offlineBadge';
+    badge.style.cssText = [
+      'position:fixed','top:14px','left:50%','transform:translateX(-50%)',
+      'background:rgba(239,68,68,0.92)','color:#fff','font-size:12px','font-weight:500',
+      'padding:5px 14px','border-radius:20px','z-index:9999',
+      'display:none','align-items:center','gap:6px',
+      'box-shadow:0 2px 12px rgba(0,0,0,0.4)','transition:opacity .3s',
+    ].join(';');
+    badge.innerHTML = '⚠ Hors ligne — données non synchronisées';
+    document.body.appendChild(badge);
+  }
+  badge.style.display = offline ? 'flex' : 'none';
+}
+
+window.addEventListener('offline', () => _setOfflineBadge(true));
+window.addEventListener('online',  () => {
+  _setOfflineBadge(false);
+  // Retentative de sync Supabase dès que la connexion revient
+  if (currentUser) saveToSupabase();
+});
 
 // ─── UTILITAIRES ───────────────────────────────────────────────────────
 
@@ -80,7 +129,7 @@ function navigate(pageId) {
   if (pageId === 'fees')       renderFees();
   if (pageId === 'savings')    renderSavings();
   if (pageId === 'salary')     renderSalary();
-  if (pageId === 'portfolio')  { renderPortfolio(); renderAssetChart(); }
+  if (pageId === 'portfolio')  { _restorePortfolioFilters(); renderPortfolio(); renderAssetChart(); }
   if (pageId === 'fiscalite')  { autoFillFiscalFromSalary(); if(typeof calculateTax==='function') calculateTax(); }
   if (pageId === 'loan')       { updateLoanCalc(); renderLoanTracking(); }
 }
@@ -135,6 +184,8 @@ async function initApp() {
     updateProjection();
     autoFillFiscalFromSalary();
     renderDisconnectButtons();
+    // Snapshot mensuel — enregistre un point d'historique si nécessaire (offline-safe)
+    maybeRecordMonthlySnapshot();
 
     // Démarrer l'auto-sync si credentials disponibles
     if (localStorage.getItem('patrimonia_sheets_id') && localStorage.getItem('patrimonia_sheets_key')) {
@@ -248,22 +299,11 @@ function setSyncInterval(mins) {
   }
 }
 
-// Sync silencieux — re-importe les données du Sheet sans toast ni loader
+// Sync silencieux — appelle connectSheets directement avec les credentials
+// SANS passer par les inputs DOM (ancienne approche fragile et risquée)
 async function silentSheetsSync(sheetId, apiKey) {
   try {
-    const keyEl = document.getElementById('sheetsApiKey');
-    const urlEl = document.getElementById('sheetsUrl');
-    const origKey = keyEl?.value;
-    const origUrl = urlEl?.value;
-
-    if (keyEl) keyEl.value = apiKey;
-    if (urlEl) urlEl.value = `https://docs.google.com/spreadsheets/d/${sheetId}`;
-
-    await connectSheets(true);
-
-    if (keyEl) keyEl.value = origKey || '';
-    if (urlEl) urlEl.value = origUrl || '';
-
+    await connectSheets(sheetId, apiKey, true);
     safeSet('lastUpdate', new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }));
   } catch(e) { console.warn('Auto-sync failed:', e.message); }
 }
@@ -272,6 +312,13 @@ async function silentSheetsSync(sheetId, apiKey) {
 // ─── DONNÉES LOCALES ────────────────────────────────────────────────────
 
 let assets = [], savings = [], expenses = [], salaryData = {}, settings = { currency: 'EUR', exposureThreshold: 20 };
+let dividends = [], histoPoints = [];
+
+// Dirty flags — seuls les blocs modifiés sont envoyés à Supabase
+const _dirty = { assets: false, savings: false, expenses: false, salary: false, settings: false, histo: false, dividends: false };
+
+function _markDirty(...keys) { keys.forEach(k => { _dirty[k] = true; }); }
+function _clearDirty()       { Object.keys(_dirty).forEach(k => { _dirty[k] = false; }); }
 
 function loadLocalData() {
   try {
@@ -280,19 +327,35 @@ function loadLocalData() {
     expenses   = JSON.parse(localStorage.getItem('patrimonia_expenses') || '[]');
     salaryData = JSON.parse(localStorage.getItem('patrimonia_salary')   || '{}');
     settings   = JSON.parse(localStorage.getItem('patrimonia_settings') || '{"currency":"EUR","exposureThreshold":20}');
+    loansTracked = JSON.parse(localStorage.getItem('patrimonia_loans')  || '[]');
+    dividends  = JSON.parse(localStorage.getItem('patrimonia_dividends')|| '[]');
+    histoPoints= JSON.parse(localStorage.getItem('patrimonia_histo')    || '[]');
   } catch(e) { console.warn('Erreur données locales:', e); }
 }
 
 let _saveDebounceTimer = null;
 
-function saveLocalData() {
-  // 1. Sauvegarde immédiate en localStorage (cache offline)
+/**
+ * saveLocalData(dirtyKeys?)
+ * Sauvegarde immédiate en localStorage, puis sync Supabase debounced.
+ * dirtyKeys : tableau de clés modifiées — si omis, toutes sont marquées dirty.
+ */
+function saveLocalData(dirtyKeys) {
+  // Persist en localStorage — toujours (rapide, synchrone)
   localStorage.setItem('patrimonia_assets',   JSON.stringify(assets));
   localStorage.setItem('patrimonia_savings',  JSON.stringify(savings));
   localStorage.setItem('patrimonia_expenses', JSON.stringify(expenses));
   localStorage.setItem('patrimonia_salary',   JSON.stringify(salaryData));
   localStorage.setItem('patrimonia_settings', JSON.stringify(settings));
-  // 2. Sync Supabase avec debounce 1.5s pour éviter les appels répétés
+  localStorage.setItem('patrimonia_loans',    JSON.stringify(loansTracked));
+  localStorage.setItem('patrimonia_dividends',JSON.stringify(dividends));
+  localStorage.setItem('patrimonia_histo',    JSON.stringify(histoPoints));
+
+  // Marquer les blocs dirty pour Supabase
+  if (dirtyKeys && dirtyKeys.length) _markDirty(...dirtyKeys);
+  else _markDirty('assets','savings','expenses','salary','settings','histo','dividends');
+
+  // Debounce : évite les appels répétés lors de modifications rapides
   clearTimeout(_saveDebounceTimer);
   _saveDebounceTimer = setTimeout(() => saveToSupabase(), 1500);
 }
@@ -300,24 +363,26 @@ function saveLocalData() {
 async function saveToSupabase() {
   if (!currentUser) return;
   try {
-    const histo = (() => { try { return JSON.parse(localStorage.getItem('patrimonia_histo')||'[]'); } catch(e){ return []; } })();
-    const divs  = (() => { try { return JSON.parse(localStorage.getItem('patrimonia_dividends')||'[]'); } catch(e){ return []; } })();
-    const { error } = await sb
-      .from('user_data')
-      .upsert({
-        user_id:    currentUser,
-        assets:     assets,
-        savings:    savings,
-        expenses:   expenses,
-        salary:     salaryData,
-        settings:   settings,
-        histo:      histo,
-        dividends:  divs,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'user_id' });
-    if (error) console.warn('Supabase save error:', error.message);
-    else {
-      // Show subtle sync indicator
+    // Ne construire le payload qu'avec les blocs réellement modifiés
+    const payload = { user_id: currentUser, updated_at: new Date().toISOString() };
+    if (_dirty.assets)    payload.assets    = assets;
+    if (_dirty.savings)   payload.savings   = savings;
+    if (_dirty.expenses)  payload.expenses  = expenses;
+    if (_dirty.salary)    payload.salary    = salaryData;
+    if (_dirty.settings)  payload.settings  = settings;
+    if (_dirty.histo)     payload.histo     = histoPoints;
+    if (_dirty.dividends) payload.dividends = dividends;
+    // loansTracked est inclus dans assets (stocké séparément, pas dans user_data Supabase)
+
+    // Si rien n'a changé depuis la dernière sync, ne pas appeler Supabase
+    const hasChanges = Object.keys(payload).length > 2; // > user_id + updated_at
+    if (!hasChanges) return;
+
+    const { error } = await sb.from('user_data').upsert(payload, { onConflict: 'user_id' });
+    if (error) {
+      console.warn('Supabase save error:', error.message);
+    } else {
+      _clearDirty();
       const ind = document.getElementById('syncIndicator');
       if (ind) { ind.style.opacity = '1'; setTimeout(() => ind.style.opacity = '0', 2000); }
     }
@@ -327,20 +392,16 @@ async function saveToSupabase() {
 async function loadFromSupabase() {
   if (!currentUser) return false;
   try {
-    const { data, error } = await sb
-      .from('user_data')
-      .select('*')
-      .eq('user_id', currentUser)
-      .single();
+    const { data, error } = await sb.from('user_data').select('*').eq('user_id', currentUser).single();
     if (error || !data) return false;
 
-    if (Array.isArray(data.assets))   { assets    = data.assets;   localStorage.setItem('patrimonia_assets',   JSON.stringify(assets)); }
-    if (Array.isArray(data.savings))  { savings   = data.savings;  localStorage.setItem('patrimonia_savings',  JSON.stringify(savings)); }
-    if (Array.isArray(data.expenses)) { expenses  = data.expenses; localStorage.setItem('patrimonia_expenses', JSON.stringify(expenses)); }
-    if (data.salary)   { salaryData = data.salary;   localStorage.setItem('patrimonia_salary',   JSON.stringify(salaryData)); }
-    if (data.settings) { settings   = data.settings; localStorage.setItem('patrimonia_settings', JSON.stringify(settings)); }
-    if (Array.isArray(data.histo)     && data.histo.length     > 0) localStorage.setItem('patrimonia_histo',     JSON.stringify(data.histo));
-    if (Array.isArray(data.dividends) && data.dividends.length > 0) localStorage.setItem('patrimonia_dividends', JSON.stringify(data.dividends));
+    if (Array.isArray(data.assets))   { assets      = data.assets;   localStorage.setItem('patrimonia_assets',   JSON.stringify(assets)); }
+    if (Array.isArray(data.savings))  { savings     = data.savings;  localStorage.setItem('patrimonia_savings',  JSON.stringify(savings)); }
+    if (Array.isArray(data.expenses)) { expenses    = data.expenses; localStorage.setItem('patrimonia_expenses', JSON.stringify(expenses)); }
+    if (data.salary)                  { salaryData  = data.salary;   localStorage.setItem('patrimonia_salary',   JSON.stringify(salaryData)); }
+    if (data.settings)                { settings    = data.settings; localStorage.setItem('patrimonia_settings', JSON.stringify(settings)); }
+    if (Array.isArray(data.histo)     && data.histo.length > 0)     { histoPoints = data.histo;   localStorage.setItem('patrimonia_histo',     JSON.stringify(histoPoints)); }
+    if (Array.isArray(data.dividends) && data.dividends.length > 0) { dividends  = data.dividends;localStorage.setItem('patrimonia_dividends', JSON.stringify(dividends)); }
     return true;
   } catch(e) { console.warn('Supabase load failed:', e.message); return false; }
 }
@@ -388,7 +449,7 @@ function getCssVar(name) {
 function initOverview() {
   // Exclude EPA:AIR from sheets-cto to avoid double-counting with sheets-airbus ESOP assets
   const totalAssets = assets
-    .filter(a => !(a.source === 'sheets-cto' && a.ticker === 'EPA:AIR'))
+    .filter(a => !a.isESOPCopy)
     .reduce((s, a) => s + assetValue(a), 0);
   const totalSav = savings.reduce((s, sv) => s + (sv.balance || 0), 0);
   const totalDebts = getTotalDebts();
@@ -442,7 +503,7 @@ function renderCategoryCards(totalAssets, totalSav, total) {
       val = totalSav;
       inv = totalSav; // savings have no gain/loss
     } else if (cat.id === 'stock') {
-      const a = assets.filter(a => (a.type || 'stock') === 'stock' && !(a.source === 'sheets-cto' && a.ticker === 'EPA:AIR'));
+      const a = assets.filter(a => (a.type || 'stock') === 'stock' && !a.isESOPCopy);
       val = a.reduce((s, x) => s + assetValue(x), 0);
       inv = a.reduce((s, x) => s + assetCost(x), 0);
     } else {
@@ -454,13 +515,13 @@ function renderCategoryCards(totalAssets, totalSav, total) {
     let ytdPnl = 0;
     if (cat.id !== 'savings') {
       const catAssets = cat.id === 'stock'
-        ? assets.filter(a => (a.type||'stock') === 'stock' && !(a.source === 'sheets-cto' && a.ticker === 'EPA:AIR'))
+        ? assets.filter(a => (a.type||'stock') === 'stock' && !a.isESOPCopy)
         : assets.filter(a => (a.type||'stock') === cat.id);
       ytdPnl = catAssets.reduce((s, a) => {
         const v = assetValue(a);
         const pctRaw = a.perfYtd;
         if (!pctRaw || isNaN(pctRaw)) return s;
-        const pct = normalizePct(pctRaw) / 100;
+        const pct = normalizePct(pctRaw, a) / 100;
         return s + (v - v / (1 + pct));
       }, 0);
     }
@@ -608,44 +669,38 @@ function renderDonutChart(catData, total) {
 }
 
 
-function normalizePct(v) {
-  // ─── RÈGLE UNIQUE ET FIABLE ───────────────────────────────────────────
-  // Le Google Sheet stocke TOUJOURS les perfs déjà en % (ex: 5.64 = +5.64%)
-  // SAUF quand la valeur est en format décimal strict (abs < 0.15 = clairement un ratio)
-  // Ex: 0.0564 → ratio → ×100 = 5.64%
-  // Ex: 5.64   → déjà en %   → 5.64%
-  // Ex: -1.81  → déjà en %   → -1.81%  (NE PAS multiplier — c'est une perf mensuelle normale)
-  // Ex: 32.67  → déjà en %   → 32.67%
-  // Ex: -106   → déjà en %   → -106%   (anormal mais gardé tel quel)
+/**
+ * normalizePct(v, asset?)
+ * Convertit une valeur de performance en pourcentage lisible.
+ *
+ * LOGIQUE DÉTERMINISTE — plus d'heuristique fragile |v| < 2 :
+ *   • Si asset.perfUnit === 'ratio' → toujours × 100  (ex: 0.476 → 47.6%)
+ *   • Si asset.perfUnit === 'pct'   → valeur directe  (ex: 47.6  → 47.6%)
+ *   • Sinon (legacy / actifs manuels) → seuil strict |v| < 1.5
+ *     Ce seuil élimine l'ambiguïté : +1.8 (ratio = +180%) vs +48 (déjà en %).
+ */
+function normalizePct(v, asset) {
   if (v === undefined || v === null || isNaN(v)) return 0;
-  // Si valeur absolue < 0.15 → c'est un ratio décimal → convertir
-  if (Math.abs(v) > 0 && Math.abs(v) < 0.15) return v * 100;
-  // Sinon déjà en pourcentage
-  return v;
+  if (asset?.perfUnit === 'ratio') return v * 100;
+  if (asset?.perfUnit === 'pct')   return v;
+  return Math.abs(v) < 1.5 ? v * 100 : v;
 }
 
 function renderPnlStats(totalAssets) {
-  // ─── SOURCE DE VÉRITÉ : colonnes Investi€ et ValTotale€ du Google Sheet ───
-  // On exclut EPA:AIR de sheets-cto (double-comptage avec sheets-airbus)
-  const filteredAssets = assets.filter(a => !(a.source === 'sheets-cto' && a.ticker === 'EPA:AIR'));
+  // Exclude EPA:AIR from sheets-cto (same double-count exclusion as totalAssets)
+  const filteredAssets = assets.filter(a => !a.isESOPCopy);
 
-  // Priorité absolue aux champs du Sheet (investi€ et valTotale€ sont déjà corrects en EUR)
-  // Fallback qty×prix uniquement si le Sheet n'a pas fourni ces colonnes
-  const totalVal = filteredAssets.reduce((s, a) => {
-    if (a.valTotale > 0) return s + a.valTotale;
-    return s + (a.qty || 0) * (a.currentPrice || a.buyPrice || 0);
-  }, 0);
+  // Use 'investi' field directly from Sheet when available — it's the most accurate
+  // because it includes all deposits over time, not just qty × buyPrice
+  const invested = filteredAssets.reduce((s, a) => s + assetCost(a), 0);
 
-  const invested = filteredAssets.reduce((s, a) => {
-    if (a.investi > 0) return s + a.investi;
-    return s + (a.qty || 0) * (a.buyPrice || 0);
-  }, 0);
+  // Total value also filtered consistently
+  const totalVal = filteredAssets.reduce((s, a) => s + assetValue(a), 0);
+  const savings  = showSavingsInTotal ? window.savings?.reduce((s, sv) => s + (sv.balance || 0), 0) || 0 : 0;
 
-  const savingsTotal = showSavingsInTotal ? window.savings?.reduce((s, sv) => s + (sv.balance || 0), 0) || 0 : 0;
-
-  // P&L = valeur actuelle des actifs - montant investi (épargne hors calcul car sans P&L)
-  const pnl    = totalVal - invested;
-  const pnlPct = invested > 0 ? (pnl / invested * 100).toFixed(2) : 0;
+  // P&L = current total (assets + savings if shown) minus invested (assets only — savings have no cost)
+  const pnl    = totalVal + savings - invested;
+  const pnlPct = invested > 0 ? ((totalVal - invested) / invested * 100).toFixed(2) : 0;
 
   const color = pnl >= 0 ? '#22c55e' : '#ef4444';
   const el = document.getElementById('kpi-pnl');
@@ -682,44 +737,23 @@ function renderPnlStats(totalAssets) {
     };
   }
 
-  // ─── P&L PAR PÉRIODE depuis l'historique réel du Sheet ────────────────
-  // Ton "Suivi CTO 2026" a col E = Plus-Value totale (valTotale - investi ce mois)
-  // On peut donc calculer les deltas directement depuis l'histo stocké
-  const histo = loadHistoPoints(); // [{date, val, inv, pv?}]
-
-  const computePeriodFromHisto = (field) => {
-    // field: 'perf1d'|'perfW'|'perfM'|'perfYtd'
-    // Priorité 1 : calculer depuis l'historique réel (plus fiable)
-    if (histo.length >= 2) {
-      const now = new Date();
-      let cutoff = new Date(now);
-      if (field === 'perf1d') cutoff.setDate(now.getDate() - 1);
-      else if (field === 'perfW')   cutoff.setDate(now.getDate() - 7);
-      else if (field === 'perfM')   cutoff.setMonth(now.getMonth() - 1);
-      else if (field === 'perfYtd') cutoff = new Date(now.getFullYear(), 0, 1);
-      const validPoints = histo.filter(h => h.val > 0);
-      const beforePoints = validPoints.filter(h => new Date(h.date) <= cutoff);
-      if (beforePoints.length > 0) {
-        const startPoint = beforePoints[beforePoints.length - 1];
-        const currentVal = totalVal + savingsTotal;
-        const delta = currentVal - startPoint.val;
-        return delta;
-      }
-    }
-    // Priorité 2 : fallback sur les perfs du Sheet par actif
+  // Compute daily/weekly/monthly/YTD P&L from asset period perf fields
+  // Only use assets that actually have period data (non-zero)
+  const computePeriodPnl = (field) => {
     return filteredAssets.reduce((s, a) => {
-      const val = a.valTotale > 0 ? a.valTotale : (a.qty||0)*(a.currentPrice||0);
+      const val = assetValue(a);
       const pctRaw = a[field];
       if (!pctRaw || isNaN(pctRaw) || pctRaw === 0) return s;
-      const pct = normalizePct(pctRaw) / 100;
+      const pct = normalizePct(pctRaw, a) / 100;
+      // val_before = val / (1 + pct), delta = val - val_before
       return s + (val - val / (1 + pct));
     }, 0);
   };
 
-  const d1Val  = computePeriodFromHisto('perf1d');
-  const w1Val  = computePeriodFromHisto('perfW');
-  const m1Val  = computePeriodFromHisto('perfM');
-  const ytdVal = computePeriodFromHisto('perfYtd');
+  const d1Val  = computePeriodPnl('perf1d');
+  const w1Val  = computePeriodPnl('perfW');
+  const m1Val  = computePeriodPnl('perfM');
+  const ytdVal = computePeriodPnl('perfYtd');
 
   [['statD1', d1Val], ['statW1', w1Val], ['statM1', m1Val], ['statYtd', ytdVal]].forEach(([id, v]) => {
     const e = document.getElementById(id);
@@ -735,7 +769,7 @@ function renderBestWorst() {
   const withPerf = assets.map(a => {
     let perf;
     if (a.perfTotal && a.perfTotal !== 0) {
-      perf = normalizePct(a.perfTotal);
+      perf = normalizePct(a.perfTotal, a);
     } else {
       const val = assetValue(a), cost = assetCost(a);
       perf = cost > 0 ? (val - cost) / cost * 100 : 0;
@@ -774,10 +808,9 @@ function toggleSavingsFilter() {
 let currentHistoPeriod = 'YTD';
 
 // Load stored history points
+// loadHistoPoints — wrapper pour compatibilité ; retourne la variable globale en mémoire
 function loadHistoPoints() {
-  try {
-    return JSON.parse(localStorage.getItem('patrimonia_histo') || '[]');
-  } catch(e) { return []; }
+  return histoPoints || [];
 }
 
 // Filter histo points by period
@@ -810,65 +843,71 @@ function renderHistoChart(total) {
   if (chartHistoInstance) chartHistoInstance.destroy();
 
   const now = new Date();
-  const histoRaw = loadHistoPoints().filter(h => h.val > 0);
+  const histoRaw = loadHistoPoints();
 
-  // ─── Courbe depuis données réelles du Sheet ─────────────────────────────
+  // ── Build curve from REAL historical data if available ──
   const buildRealCurve = (period) => {
-    const filtered = filterHistoByPeriod(histoRaw, period);
+    const filtered = filterHistoByPeriod(histoRaw, period).filter(h => h.val > 0);
     if (filtered.length < 2) return null;
 
-    const labels   = filtered.map(h => {
+    const labels = filtered.map(h => {
       const d = new Date(h.date);
       return d.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
     });
-    const dataVal  = filtered.map(h => Math.round(h.val));
-    const dataInv  = filtered.map(h => h.inv > 0 ? Math.round(h.inv) : null);
-    const dataPv   = filtered.map(h => h.pv !== undefined ? Math.round(h.pv) : null);
+    const data = filtered.map(h => Math.round(h.val));
 
-    // Ajouter le point courant si différent du dernier point stocké
-    const lastStored = dataVal[dataVal.length - 1];
+    // Append current total as last point if it differs from last stored point
+    const lastStored = data[data.length - 1];
     if (Math.abs(lastStored - total) > 50) {
-      labels.push('Auj.');
-      dataVal.push(Math.round(total));
-      dataInv.push(dataInv[dataInv.length - 1]); // extrapoler investi
-      dataPv.push(null);
+      labels.push(now.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' }));
+      data.push(Math.round(total));
     }
-    return { labels, dataVal, dataInv };
+    return { labels, data };
   };
 
-  // ─── Courbe estimée si pas d'historique ─────────────────────────────────
+  // ── Fallback: estimate curve from period performance fields ──
   const buildEstimCurve = (pts, monthsBack, perfField) => {
-    const labels = [], dataVal = [], dataInv = [];
-    const filteredAssets = assets.filter(a => !(a.source === 'sheets-cto' && a.ticker === 'EPA:AIR'));
-    const assetsWithPerf = filteredAssets.filter(a => {
+    const labels = [], data = [];
+    const assetsWithPerf = assets.filter(a => {
       const v = a[perfField];
       return v !== undefined && v !== null && !isNaN(v) && v !== 0;
     });
-    let totalPeriodPnl = assetsWithPerf.length > 0
-      ? assetsWithPerf.reduce((s, a) => {
-          const val = a.valTotale > 0 ? a.valTotale : (a.qty||0)*(a.currentPrice||0);
-          const pct = normalizePct(a[perfField]) / 100;
-          return s + (val - val / (1 + pct));
-        }, 0)
-      : 0;
+    let totalPeriodPnl;
+    if (assetsWithPerf.length > 0) {
+      totalPeriodPnl = assetsWithPerf.reduce((s, a) => {
+        const val = assetValue(a);
+        const pct = normalizePct(a[perfField], a) / 100;
+        return s + (val - val / (1 + pct));
+      }, 0);
+    } else {
+      const totalCost = assets
+        .filter(a => !a.isESOPCopy)
+        .reduce((s, a) => s + assetCost(a), 0);
+      totalPeriodPnl = total - totalCost - (showSavingsInTotal ? savings.reduce((s,sv)=>s+(sv.balance||0),0) : 0);
+    }
     const startVal = Math.max(0, total - totalPeriodPnl);
-    const invested = filteredAssets.reduce((s,a) => s + (a.investi > 0 ? a.investi : (a.qty||0)*(a.buyPrice||0)), 0);
 
     for (let i = pts; i >= 0; i--) {
       const d = new Date(now);
-      d.setDate(d.getDate() - Math.round(i * (monthsBack * 30) / pts));
-      labels.push(d.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' }));
-      const tt = 1 - i / pts;
-      const eased = tt < 0.5 ? 2*tt*tt : -1+(4-2*tt)*tt;
-      dataVal.push(Math.round(startVal + (total - startVal) * eased));
-      dataInv.push(Math.round(invested));
+      const daysBack = Math.round(i * (monthsBack * 30) / pts);
+      d.setDate(d.getDate() - daysBack);
+      if (monthsBack <= 1) {
+        labels.push(d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }));
+      } else {
+        labels.push(d.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' }));
+      }
+      const t = 1 - i / pts;
+      const eased = t < 0.5 ? 2*t*t : -1+(4-2*t)*t;
+      data.push(Math.round(startVal + (total - startVal) * eased));
     }
-    dataVal[dataVal.length - 1] = total;
-    return { labels, dataVal, dataInv };
+    data[data.length - 1] = total;
+    return { labels, data };
   };
 
-  const realCurve = buildRealCurve(currentHistoPeriod);
   let curve;
+  // Try real data first for monthly/long periods
+  const realCurve = buildRealCurve(currentHistoPeriod);
+
   if (realCurve && ['YTD','1A','TOUT','3M','1M'].includes(currentHistoPeriod)) {
     curve = realCurve;
   } else {
@@ -878,89 +917,52 @@ function renderHistoChart(total) {
       case '1M':   curve = realCurve || buildEstimCurve(30, 1, 'perfM');   break;
       case '3M':   curve = realCurve || buildEstimCurve(12, 3, 'perfM');   break;
       case 'YTD': {
-        const ms = now.getMonth() + now.getDate()/30;
-        curve = realCurve || buildEstimCurve(Math.max(6, Math.round(ms*4)), ms, 'perfYtd');
+        const monthsSinceJan = now.getMonth() + now.getDate()/30;
+        curve = realCurve || buildEstimCurve(Math.max(6, Math.round(monthsSinceJan * 4)), monthsSinceJan, 'perfYtd');
         break;
       }
-      case '1A':   curve = realCurve || buildEstimCurve(12, 12, 'perfYtd'); break;
-      case 'TOUT': curve = realCurve || buildEstimCurve(24, 24, 'perfYtd'); break;
-      default:     curve = realCurve || buildEstimCurve(12, 12, 'perfYtd'); break;
+      case '1A':   curve = realCurve || buildEstimCurve(12, 12, 'perfYtd');  break;
+      case 'TOUT': curve = realCurve || buildEstimCurve(24, 24, 'perfYtd');  break;
+      default:     curve = realCurve || buildEstimCurve(12, 12, 'perfYtd');  break;
     }
   }
 
-  const isUp = curve.dataVal[curve.dataVal.length-1] >= curve.dataVal[0];
+  // Source indicator — show badge if using real data
+  const dateLabel = document.getElementById('overviewDateLabel');
+  if (dateLabel) {
+    const usingReal = realCurve && ['YTD','1A','TOUT','3M','1M'].includes(currentHistoPeriod);
+    dateLabel.innerHTML = `Patrimoine brut ${usingReal ? '<span style="font-size:10px;color:var(--green);margin-left:6px;">● Historique réel</span>' : ''}`;
+  }
+
+  // Determine chart color
+  const isUp = curve.data[curve.data.length-1] >= curve.data[0];
   const lineColor = isUp ? '#3b82f6' : '#ef4444';
   const fillColor = isUp ? 'rgba(59,130,246,0.08)' : 'rgba(239,68,68,0.06)';
-  const hasInvested = curve.dataInv && curve.dataInv.some(v => v > 0);
-
-  const datasets = [
-    {
-      label: 'Valeur portefeuille',
-      data: curve.dataVal,
-      borderColor: lineColor,
-      backgroundColor: fillColor,
-      fill: true,
-      tension: 0.4,
-      pointRadius: 0,
-      borderWidth: 2,
-    }
-  ];
-
-  // Ajouter la courbe "Investi" si on a des données réelles (= ça montre l'effet DCA)
-  if (hasInvested && realCurve) {
-    datasets.push({
-      label: 'Capital investi',
-      data: curve.dataInv,
-      borderColor: 'rgba(148,163,184,0.5)',
-      backgroundColor: 'transparent',
-      fill: false,
-      tension: 0.1,
-      pointRadius: 0,
-      borderWidth: 1.5,
-      borderDash: [4, 4],
-    });
-  }
-
-  const gridCol = getComputedStyle(document.documentElement).getPropertyValue('--border') || 'rgba(255,255,255,0.06)';
-  const mutedCol = getComputedStyle(document.documentElement).getPropertyValue('--muted2') || '#71717a';
 
   chartHistoInstance = new Chart(ctx.getContext('2d'), {
     type: 'line',
-    data: { labels: curve.labels, datasets },
+    data: { labels: curve.labels, datasets: [{ data: curve.data, borderColor: lineColor, backgroundColor: fillColor, fill: true, tension: 0.4, pointRadius: 0, borderWidth: 2 }] },
     options: {
       responsive: true, maintainAspectRatio: false,
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: { display: hasInvested && !!realCurve, labels: { color: mutedCol, font: { size: 10 }, boxWidth: 20, padding: 8 } },
-        tooltip: {
-          callbacks: {
-            label: ctx => `${ctx.dataset.label} : ${fmt.format(ctx.parsed.y)}`,
-            afterBody: (items) => {
-              // Afficher le P&L à ce point
-              if (items.length >= 2) {
-                const val = items[0].parsed.y;
-                const inv = items[1].parsed.y;
-                const pv  = val - inv;
-                const pct = inv > 0 ? (pv/inv*100).toFixed(1) : 0;
-                return [`Plus-value : ${pv >= 0 ? '+' : ''}${fmt.format(pv)} (${pct >= 0 ? '+' : ''}${pct}%)`];
-              }
-              return [];
-            }
-          }
-        }
-      },
+      plugins: { legend: { display: false }, tooltip: {
+        callbacks: { label: ctx => fmt.format(ctx.parsed.y) }
+      }},
       scales: {
         y: {
           display: true,
-          grid: { color: gridCol },
+          position: 'left',
+          grid: { color: (_css.border) },
           ticks: {
-            color: mutedCol,
+            color: _css.muted2,
             font: { size: 10 },
             maxTicksLimit: 5,
-            callback: v => v >= 1000 ? (v/1000).toFixed(1) + ' k€' : v + ' €'
+            callback: v => {
+              if (v >= 1000) return (v/1000).toFixed(v%1000===0?0:1) + ' k€';
+              return v + ' €';
+            }
           }
         },
-        x: { grid: { display: false }, ticks: { color: mutedCol, font: { size: 10 }, maxTicksLimit: 8 } }
+        x: { grid: { display: false }, ticks: { color: _css.muted2, font: { size: 10 }, maxTicksLimit: 8 } }
       }
     }
   });
@@ -971,20 +973,10 @@ function setHistoPeriod(period, btn) {
   document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active', 'active-default'));
   btn.classList.add('active');
   const totalAssets = assets
-    .filter(a => !(a.source === 'sheets-cto' && a.ticker === 'EPA:AIR'))
-    .reduce((s, a) => s + (a.valTotale > 0 ? a.valTotale : (a.qty||0)*(a.currentPrice||0)), 0);
+    .filter(a => !a.isESOPCopy)
+    .reduce((s, a) => s + assetValue(a), 0);
   const totalSav = savings.reduce((s, sv) => s + (sv.balance || 0), 0);
   const total    = showSavingsInTotal ? totalAssets + totalSav : totalAssets;
-
-  // Update date label avec indicateur source réelle/estimée
-  const hasRealHisto = loadHistoPoints().filter(h => h.val > 0).length > 1;
-  const dateLabel = document.getElementById('overviewDateLabel');
-  if (dateLabel) {
-    const modeLabel = patrimoineMode === 'net' ? 'Patrimoine net' : patrimoineMode === 'sans-epargne' ? 'Sans épargne' : 'Patrimoine brut';
-    const today = new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
-    dateLabel.innerHTML = `${modeLabel} <span style="color:var(--muted2);font-size:11px;margin-left:6px;">${today}</span>${hasRealHisto ? ' <span style="font-size:10px;color:var(--green);margin-left:4px;">● Données réelles</span>' : ' <span style="font-size:10px;color:var(--muted2);margin-left:4px;">○ Estimé</span>'}`;
-  }
-
   renderHistoChart(total);
   renderPeriodPnl(period, total);
 }
@@ -993,88 +985,43 @@ function setHistoPeriod(period, btn) {
 function renderPeriodPnl(period, total) {
   const histo = loadHistoPoints();
 
-  // ─── SOURCE DE VÉRITÉ : historique réel depuis "Suivi CTO 2026" ────────
-  // Chaque point histo a : { date, val, inv, pv (Plus-Value), perf (Perf Mensuelle%) }
-  //
-  // Pour YTD → comparer point de début d'année au total actuel
-  // Pour 1M  → comparer avant-dernier point au dernier
-  // Pour 7J/1J → pas de données hebdo dans le Sheet mensuel → fallback actifs
+  // Map period → perf field for live assets
+  const perfFieldMap = { '1J':'perf1d', '7J':'perfW', '1M':'perfM', '3M':'perfM', 'YTD':'perfYtd', '1A':'perfYtd', 'TOUT':'perfYtd' };
+  const perfField = perfFieldMap[period] || 'perfYtd';
 
+  // Try to get period P&L from historical data first
   let periodPnl = null;
   let periodPct = null;
 
-  const validHisto = histo.filter(h => h.val > 0).sort((a,b) => a.date.localeCompare(b.date));
-
-  if (validHisto.length >= 1) {
-    const now = new Date();
-    let cutoff = null;
-
-    if (period === 'YTD') {
-      cutoff = new Date(now.getFullYear(), 0, 1); // 1er janvier
-    } else if (period === '1A') {
-      cutoff = new Date(now); cutoff.setFullYear(now.getFullYear() - 1);
-    } else if (period === '3M') {
-      cutoff = new Date(now); cutoff.setMonth(now.getMonth() - 3);
-    } else if (period === '1M') {
-      cutoff = new Date(now); cutoff.setMonth(now.getMonth() - 1);
-    } else if (period === 'TOUT') {
-      cutoff = new Date('2000-01-01');
-    }
-
-    if (cutoff) {
-      // Trouver le premier point AVANT la cutoff (= valeur de référence)
-      const cutoffStr = cutoff.toISOString().substring(0, 10);
-      const beforeCutoff = validHisto.filter(h => h.date <= cutoffStr);
-      const refPoint = beforeCutoff.length > 0
-        ? beforeCutoff[beforeCutoff.length - 1]  // dernier point avant cutoff
-        : validHisto[0];                          // sinon le tout premier
-
-      // Valeur de fin = total actuel (live depuis les actifs)
-      const startVal = refPoint.val;
-      const endVal   = total > 0 ? total : validHisto[validHisto.length-1].val;
-
+  if (histo.length >= 2 && ['YTD','1A','TOUT','3M','1M'].includes(period)) {
+    const filtered = filterHistoByPeriod(histo, period).filter(h => h.val > 0);
+    if (filtered.length >= 2) {
+      const startPoint = filtered[0];
+      const endPoint   = filtered[filtered.length - 1];
+      // Use the actual current total (passed in) as endVal for the most recent period
+      // This avoids stale histo data vs current asset values
+      const isCurrentPeriod = endPoint === filtered[filtered.length - 1];
+      const startVal = startPoint.val;
+      const endVal   = total > 0 ? total : endPoint.val; // prefer live total
       if (startVal > 0 && endVal > 0) {
-        // P&L réel = variation valeur - nouveaux apports sur la période
-        // Pour YTD : somme des dépôts depuis le début de l'année
-        let apportsperiode = 0;
-        if (['YTD','1A','3M','1M','TOUT'].includes(period)) {
-          const cutoffStr2 = cutoff.toISOString().substring(0,'2000-01-01'.length);
-          apportsperiode = validHisto
-            .filter(h => h.date > cutoffStr2 && (h.depo || 0) > 0)
-            .reduce((s, h) => s + (h.depo || 0), 0);
-        }
-        // P&L = (valeur finale - valeur initiale) - apports sur la période
-        // = performance pure sans biais DCA
-        const variationBrute = endVal - startVal;
-        periodPnl = variationBrute - apportsperiode;
-        // Pct sur base de départ
-        periodPct = startVal > 0 ? (variationBrute / startVal) * 100 : 0;
-      }
-    } else if (period === '7J' && validHisto.length >= 2) {
-      // Pour 7J : comparer les 2 derniers points mensuels (approximation)
-      const last = validHisto[validHisto.length - 1];
-      const prev = validHisto[validHisto.length - 2];
-      if (last.val > 0 && prev.val > 0) {
-        periodPnl = last.val - prev.val - (last.depo || 0);
-        periodPct = prev.val > 0 ? ((last.val - prev.val) / prev.val) * 100 : 0;
+        periodPnl = endVal - startVal;
+        periodPct = (periodPnl / startVal) * 100;
       }
     }
   }
 
-  // Fallback : utiliser les perfs par actif si pas d'histo
+  // Fallback: use asset perf fields
   if (periodPnl === null) {
-    const perfFieldMap = { '1J':'perf1d', '7J':'perfW', '1M':'perfM', '3M':'perfM', 'YTD':'perfYtd', '1A':'perfYtd', 'TOUT':'perfYtd' };
-    const perfField = perfFieldMap[period] || 'perfYtd';
-    const filteredAssets = assets.filter(a => !(a.source === 'sheets-cto' && a.ticker === 'EPA:AIR'));
+    const filteredAssets = assets.filter(a => !a.isESOPCopy);
     periodPnl = filteredAssets.reduce((s, a) => {
-      const val = a.valTotale > 0 ? a.valTotale : (a.qty||0)*(a.currentPrice||0);
+      const val = assetValue(a);
       const pctRaw = a[perfField];
       if (!pctRaw || isNaN(pctRaw) || pctRaw === 0) return s;
-      const pct = normalizePct(pctRaw) / 100;
+      const pct = normalizePct(pctRaw, a) / 100;
       return s + (val - val / (1 + pct));
     }, 0);
-    const totalValF = filteredAssets.reduce((s, a) => s + (a.valTotale > 0 ? a.valTotale : (a.qty||0)*(a.currentPrice||0)), 0);
-    const startVal  = totalValF - periodPnl;
+    const totalVal = filteredAssets.reduce((s, a) => s + assetValue(a), 0);
+    const startVal = totalVal - periodPnl;
     periodPct = startVal > 0 ? (periodPnl / startVal * 100) : 0;
   }
 
@@ -1110,23 +1057,69 @@ function renderPeriodPnl(period, total) {
   safeSet('perfPeriodLabel', periodLabels[period] || 'Période sélectionnée');
 }
 
-// ─── PORTEFEUILLE ────────────────────────────────────────────────────────
+// ─── SNAPSHOT MENSUEL AUTOMATIQUE ────────────────────────────────────────
+// Enregistre un point d'historique au 1er de chaque mois, même sans Sheets.
+// Garantit la continuité de la courbe historique offline.
+function maybeRecordMonthlySnapshot() {
+  const total = assets.filter(a => !a.isESOPCopy).reduce((s, a) => s + assetValue(a), 0)
+              + savings.reduce((s, sv) => s + (sv.balance || 0), 0);
+  if (total <= 0) return; // Pas de données — rien à enregistrer
 
-let currentSort = 'val_desc';
+  const now      = new Date();
+  const thisMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  const lastKey   = localStorage.getItem('patrimonia_snapshot_month');
+
+  if (lastKey === thisMonth) return; // Déjà fait ce mois-ci
+
+  const invested = assets.filter(a => !a.isESOPCopy).reduce((s, a) => s + assetCost(a), 0);
+  const today    = now.toISOString().substring(0, 10);
+
+  // Ajouter ou mettre à jour le point du mois courant
+  const existing = histoPoints.filter(h => !h.date.startsWith(thisMonth));
+  histoPoints = [...existing, { date: today, val: Math.round(total), inv: Math.round(invested) }]
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  localStorage.setItem('patrimonia_histo',          JSON.stringify(histoPoints));
+  localStorage.setItem('patrimonia_snapshot_month', thisMonth);
+  _markDirty('histo');
+  console.log(`[Patrimonia] Snapshot mensuel ${thisMonth} enregistré : ${Math.round(total).toLocaleString('fr-FR')} €`);
+}
+
+// Persistance tri + filtres entre sessions
+let currentSort = localStorage.getItem('patrimonia_sort') || 'val_desc';
 
 function setSortFilter(sort) {
   currentSort = sort;
+  localStorage.setItem('patrimonia_sort', sort);
   document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
   const btn = document.getElementById('sort_' + sort);
   if (btn) btn.classList.add('active');
   renderPortfolio();
 }
 
+function _restorePortfolioFilters() {
+  const savedSort   = localStorage.getItem('patrimonia_sort')         || 'val_desc';
+  const savedSrc    = localStorage.getItem('patrimonia_filter_src')   || 'all';
+  const savedType   = localStorage.getItem('patrimonia_filter_type')  || 'all';
+  currentSort = savedSort;
+  const srcEl  = document.getElementById('filterSource');
+  const typeEl = document.getElementById('filterType');
+  if (srcEl)  srcEl.value  = savedSrc;
+  if (typeEl) typeEl.value = savedType;
+  const btn = document.getElementById('sort_' + savedSort);
+  if (btn) btn.classList.add('active');
+}
+
 function renderPortfolio() {
+  const srcEl  = document.getElementById('filterSource');
+  const typeEl = document.getElementById('filterType');
+  const srcF   = srcEl?.value  || 'all';
+  const typF   = typeEl?.value || 'all';
+  // Persister les filtres sélectionnés
+  localStorage.setItem('patrimonia_filter_src',  srcF);
+  localStorage.setItem('patrimonia_filter_type', typF);
   const tbody = document.getElementById('portfolioTbody');
   if (!tbody) return;
-  const srcF = document.getElementById('filterSource')?.value || 'all';
-  const typF = document.getElementById('filterType')?.value   || 'all';
   // EPA:AIR (sheets-cto) is shown here under Actions/ETF; ESOP PEG (sheets-airbus) under ESOP/PER
   // Double-counting is avoided in initOverview/renderCategoryCards, not here
   let filtered = assets.filter(a => (srcF === 'all' || a.source === srcF) && (typF === 'all' || a.type === typF));
@@ -1149,7 +1142,7 @@ function renderPortfolio() {
 
   const fmtPct = (v) => {
     if (v === undefined || v === null || isNaN(v)) return '<span class="perf-zero">\u2013</span>';
-    const pct = normalizePct(v);
+    const pct = normalizePct(v, a);
     if (Math.abs(pct) < 0.001) return '<span class="perf-zero">\u2013</span>';
     const cls = pct >= 0 ? 'perf-pos' : 'perf-neg';
     return `<span class="${cls}">${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%</span>`;
@@ -1162,7 +1155,7 @@ function renderPortfolio() {
     // Always compute total P&L% from actual val/cost — don't trust perfTotal for "Total" column
     // perfTotal from sheet can be wrong (e.g. Booking -118% due to ratio format mismatch)
     const pnlPct = cost > 0 ? (pnl / cost) * 100
-      : (a.perfTotal && a.perfTotal !== 0 ? normalizePct(a.perfTotal) : 0);
+      : (a.perfTotal && a.perfTotal !== 0 ? normalizePct(a.perfTotal, a) : 0);
     const pnlP   = Math.abs(pnlPct) > 0.01 ? pnlPct.toFixed(1) : '\u2013';
     const poids  = totalVal > 0 ? ((val / totalVal) * 100).toFixed(1) : '\u2013';
     const pc     = pnl >= 0 ? 'perf-pos' : 'perf-neg';
@@ -1236,7 +1229,7 @@ function renderAssetChart() {
     return raw || 0;
   };
 
-  const normPct = (v) => normalizePct(v);
+  const normPct = (v, a) => normalizePct(v, a);
 
   // Build bar chart data — top 10 by value
   const displayAssets = isGlobal
@@ -1246,9 +1239,9 @@ function renderAssetChart() {
   const labels = displayAssets.map(a => (a.ticker || a.name || '?').replace(/\s*\(.*?\)\s*/, '').substring(0, 12));
   const perfData = displayAssets.map(a => parseFloat(normPct(getPerfRatio(a)).toFixed(1)));
   const bgColors = perfData.map(v => v >= 0 ? 'rgba(34,197,94,0.75)' : 'rgba(239,68,68,0.75)');
-  const mutedCol = getCssVar('--muted2') || '#71717a';
-  const textCol  = getCssVar('--text')   || '#f0f2f5';
-  const gridCol  = getCssVar('--border') || 'rgba(255,255,255,0.06)';
+  const mutedCol = _css.muted2;
+  const textCol  = _css.text;
+  const gridCol  = _css.border;
 
   // Display total value and global perf
   if (isGlobal) {
@@ -1355,7 +1348,7 @@ function renderSavings() {
     chartSavingsInstance = new Chart(ctx.getContext('2d'), {
       type:'doughnut',
       data:{ labels:savings.map(s=>s.name), datasets:[{data:savings.map(s=>s.balance), backgroundColor:['#3b82f6','#22c55e','#f59e0b','#a78bfa','#ef4444','#06b6d4'], borderWidth:0}] },
-      options:{cutout:'65%',plugins:{legend:{position:'right',labels:{color:getComputedStyle(document.documentElement).getPropertyValue('--text')||'#fff',font:{size:11}}}}}
+      options:{cutout:'65%',plugins:{legend:{position:'right',labels:{color:_css.text,font:{size:11}}}}}
     });
   }
 }
@@ -1379,7 +1372,7 @@ function saveEditSavings() {
     balance: parseFloat(document.getElementById('editSavBal').value)  || 0,
     rate:    parseFloat(document.getElementById('editSavRate').value)  || 0,
   };
-  saveLocalData(); closeModal('editSavings'); renderSavings(); initOverview();
+  saveLocalData(['savings']); closeModal('editSavings'); renderSavings(); initOverview();
   showToast('Livret mis à jour ✓', '#22c55e');
 }
 
@@ -1389,12 +1382,12 @@ function addSavings() {
   savings.push({ name, balance:parseFloat(document.getElementById('savBalance')?.value)||0, rate:parseFloat(document.getElementById('savRate')?.value)||0 });
   // Reset form
   ['savName','savBalance','savRate'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
-  saveLocalData(); closeModal('addSavings'); renderSavings(); initOverview(); showToast('Livret ajouté ✓','#22c55e');
+  saveLocalData(['savings']); closeModal('addSavings'); renderSavings(); initOverview(); showToast('Livret ajouté ✓','#22c55e');
 }
 
 function deleteSavings(i) {
   if (!confirm(`Supprimer "${savings[i]?.name}" ?`)) return;
-  savings.splice(i,1); saveLocalData(); renderSavings(); initOverview();
+  savings.splice(i,1); saveLocalData(['savings']); renderSavings(); initOverview();
 }
 
 function switchLoanTab(tab) {
@@ -1409,12 +1402,13 @@ function switchLoanTab(tab) {
 
 
 
+// loansTracked est initialisé dans loadLocalData()
 let loansTracked = [];
-try { loansTracked = JSON.parse(localStorage.getItem('patrimonia_loans') || '[]'); } catch(e) {}
 
 function saveLoans() {
+  // Utilise saveLocalData avec dirty flag ciblé pour ne pas re-sauvegarder tout
   localStorage.setItem('patrimonia_loans', JSON.stringify(loansTracked));
-  // Sync to Supabase via saveLocalData hook
+  _markDirty('assets'); // loansTracked est séparé de user_data — pas de colonne dédiée
   clearTimeout(_saveDebounceTimer);
   _saveDebounceTimer = setTimeout(() => saveToSupabase(), 1500);
 }
@@ -1646,7 +1640,7 @@ function estimateNet() {
 function saveSalary() {
   const g=id=>parseFloat(document.getElementById(id)?.value)||0;
   salaryData={gross:g('salGross'),net:g('salNet'),inter:g('salInter'),part:g('salPart'),saved:g('salSaved'),abond:g('salAbond'),apl:g('salApl'),caf:g('salCaf'),transport:g('salTransport'),tr:g('salTr'),other:g('salOther')};
-  saveLocalData(); closeModal('editSalary'); renderSalary(); initOverview();
+  saveLocalData(['salary']); closeModal('editSalary'); renderSalary(); initOverview();
   autoFillFiscalFromSalary();
   showToast('Salaire enregistré ✓','#22c55e');
 }
@@ -1668,10 +1662,10 @@ function addExpense() {
   if (capField) capField.value = '';
   const creditDiv = document.getElementById('creditCapitalField');
   if (creditDiv) creditDiv.style.display = 'none';
-  saveLocalData(); closeModal('addExpense'); renderSalary(); initOverview(); showToast('Dépense ajoutée ✓','#22c55e');
+  saveLocalData(['expenses']); closeModal('addExpense'); renderSalary(); initOverview(); showToast('Dépense ajoutée ✓','#22c55e');
 }
 
-function deleteExpense(i) { expenses.splice(i,1); saveLocalData(); renderSalary(); initOverview(); }
+function deleteExpense(i) { expenses.splice(i,1); saveLocalData(['expenses']); renderSalary(); initOverview(); }
 
 // ─── PROJECTION DCA ──────────────────────────────────────────────────────
 
@@ -1714,9 +1708,9 @@ function updateProjection() {
       {label:'Total investi',  data:dataInv,borderColor:'#52525b',borderDash:[5,5],fill:false,pointRadius:0}
     ]},
     options:{responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{labels:{color:getComputedStyle(document.documentElement).getPropertyValue('--muted2')||'#94a3b8',font:{size:11}}}},
-      scales:{y:{grid:{color:getComputedStyle(document.documentElement).getPropertyValue('--border')||'rgba(255,255,255,0.04)'},ticks:{color:getComputedStyle(document.documentElement).getPropertyValue('--muted2')||'#52525b',callback:v=>fmt.format(v)}},
-              x:{grid:{display:false},ticks:{color:getComputedStyle(document.documentElement).getPropertyValue('--muted2')||'#52525b',maxTicksLimit:8}}}}
+      plugins:{legend:{labels:{color:_css.muted2,font:{size:11}}}},
+      scales:{y:{grid:{color:_css.border},ticks:{color:_css.muted2,callback:v=>fmt.format(v)}},
+              x:{grid:{display:false},ticks:{color:_css.muted2,maxTicksLimit:8}}}}
   });
 }
 
@@ -1751,18 +1745,31 @@ function addAsset() {
     currentPrice:parseFloat(g('assetCurrentPrice')?.value)||0, geo:g('assetGeo')?.value||'world',
     sector:g('assetSector')?.value||'mixed', currency:g('assetCurrency')?.value||'EUR',
     fees:parseFloat(g('assetFees')?.value)||0 });
-  saveLocalData(); closeModal('addAsset'); initOverview(); renderPortfolio(); showToast(name+' ajouté ✓','#22c55e');
+  saveLocalData(['assets']); closeModal('addAsset'); initOverview(); renderPortfolio(); showToast(name+' ajouté ✓','#22c55e');
 }
 
 // ─── CONNEXIONS ──────────────────────────────────────────────────────────
 
-async function connectSheets(silent = false) {
-  const apiKey = document.getElementById('sheetsApiKey')?.value?.trim();
-  const url    = document.getElementById('sheetsUrl')?.value?.trim();
-  if (!apiKey || !url) return showToast('Clé API et URL requis', '#ef4444');
-  const match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-  if (!match) return showToast('URL invalide', '#ef4444');
-  const sheetId = match[1];
+/**
+ * connectSheets(sheetIdOrNull, apiKeyOrNull, silent)
+ * Peut être appelée de deux façons :
+ *   1. Par l'UI  → connectSheets() : lit les inputs DOM
+ *   2. Par sync  → connectSheets(sheetId, apiKey, true) : paramètres directs, jamais de DOM
+ */
+async function connectSheets(sheetIdParam, apiKeyParam, silent = false) {
+  // Résolution des credentials : paramètres > DOM > localStorage
+  let apiKey, sheetId;
+  if (sheetIdParam && apiKeyParam) {
+    sheetId = sheetIdParam;
+    apiKey  = apiKeyParam;
+  } else {
+    apiKey  = document.getElementById('sheetsApiKey')?.value?.trim();
+    const url = document.getElementById('sheetsUrl')?.value?.trim();
+    if (!apiKey || !url) return showToast('Clé API et URL requis', '#ef4444');
+    const match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+    if (!match) return showToast('URL invalide', '#ef4444');
+    sheetId = match[1];
+  }
   const btn = document.getElementById('importSheetsBtn');
 
   // Parse number: handles French locale "1 282,40" → 1282.40, "1.282,40" → 1282.40
@@ -1796,12 +1803,16 @@ async function connectSheets(silent = false) {
     assets = assets.filter(a => !a.source?.startsWith('sheets-'));
     let imported = 0;
 
+    // ── FETCH PARALLÈLE phase 1 : onglets de données ─────────────────────
+    const [ctoRows, airbusRows, cryptoRows] = await Promise.all([
+      fetchTab('CTO'),
+      fetchTab('AIRBUS'),
+      fetchTab('Crypto'),
+    ]);
+
     // CTO — A=Ticker B=Nom C=Qté D=PRU E=Prix(devise locale) F=Investi(€) G=ValTotale(€)
     //        H=1J I=Hebdo J=1Mois K=6Mois L=YTD M=Perf% N=Catégorie O=Secteur P=ZoneGéo
     //        U=TickerLocal V=TickerYahoo W=Devise X=PrixSecours
-    //        Note: Prix (col E) peut être en USD pour les actions US.
-    //              Investi (col F) et ValTotale (col G) sont TOUJOURS en EUR.
-    const ctoRows = await fetchTab('CTO');
     if (ctoRows) {
       ctoRows.slice(1).forEach(row => {
         const ticker = t(row[0]);
@@ -1844,10 +1855,13 @@ async function connectSheets(silent = false) {
           source:       'sheets-cto',
           type:         'stock',
           qty,
-          buyPrice:     pru,           // PRU en devise locale (pour calcul % relatif)
-          currentPrice: prixEUR,       // Prix en EUR
-          investi,                     // Coût total en EUR ✓
-          valTotale,                   // Valeur totale en EUR ✓
+          buyPrice:     pru,
+          currentPrice: prixEUR,
+          investi,
+          valTotale,
+          // Colonnes H/I/J/K = ratio (ex: -0.007 = -0.7%) → perfUnit:'ratio'
+          // Colonne M (perfTotal) = % direct (ex: 47.6) → non concernée par perfUnit
+          perfUnit:  'ratio',
           perf1d:   p(row[7]),
           perfW:    p(row[8]),
           perfM:    p(row[9]),
@@ -1863,7 +1877,6 @@ async function connectSheets(silent = false) {
 
     // AIRBUS — A=Année B=Enveloppe C=Nom D=Investi E=ActionsAchetées F=ActionsOffertes
     //          G=PartsDividendes H=TotalQté I=PRUAchat J=PRURéel K=Cours L=ValTotale M=Perf%
-    const airbusRows = await fetchTab('AIRBUS');
     if (airbusRows) {
       airbusRows.slice(1).forEach(row => {
         const enveloppe = t(row[1]).toUpperCase();  // PEG ou PERCOL
@@ -1914,7 +1927,10 @@ async function connectSheets(silent = false) {
           currentPrice: cours,
           investi,
           valTotale:    val,
+          perfUnit:     'pct',          // col M Airbus = % direct (ex: 42.3 = +42.3%)
           perfTotal:    perf,
+          // FLAG : actif EPA:AIR ESOP — exclu du total CTO pour éviter le double-comptage
+          isESOPCopy:   ticker === 'EPA:AIR',
           enveloppe,
           geo:          'eu',
           sector:       'industry',
@@ -1934,7 +1950,6 @@ async function connectSheets(silent = false) {
     }
 
     // CRYPTO — A=Ticker B=Nom C=Qté D=PRU E=Prix€ F=Investi G=ValTotale H=Perf%
-    const cryptoRows = await fetchTab('Crypto');
     if (cryptoRows) {
       cryptoRows.slice(1).forEach(row => {
         const ticker = t(row[0]);
@@ -1944,106 +1959,92 @@ async function connectSheets(silent = false) {
         if (qty === 0 && prix === 0) return;
         assets.push({ name:`${nom} (${ticker})`, ticker, source:'sheets-crypto', type:'crypto',
           qty, buyPrice:p(row[3]), currentPrice:prix, investi:p(row[5]), valTotale:p(row[6]),
-          perfTotal:p(row[7]), geo:'other', sector:'crypto', currency:'EUR', fees:0 });
+          perfTotal:p(row[7]), perfUnit:'pct',
+          geo:'other', sector:'crypto', currency:'EUR', fees:0 });
         imported++;
       });
     }
 
-    // ─── HISTORIQUE MENSUEL — SOURCE UNIQUE : "Suivi CTO 2026" ─────────────
-    // Structure de ton onglet (confirmée par screenshot) :
-    // Col A=Date | B=Investi | C=Valeur Totale | D=Dépôt Mois | E=Plus-Value | F=Perf Mensuelle
-    //
-    // IMPORTANT : on lit UNIQUEMENT "Suivi CTO" comme source globale du patrimoine CTO.
-    // On n'additionne PLUS Airbus + Crypto séparément — ça créait des doublons.
-    // Si tu veux le patrimoine TOTAL (CTO + Airbus + Crypto + Épargne) dans le graphe,
-    // crée un onglet "Suivi Global" avec la même structure, et on le lira en priorité.
+    // ─── HISTORIQUE MENSUEL ──────────────────────────────────────────────
+    // Lit "Suivi patrimoine" (vue globale) + onglets Suivi CTO/Airbus/Crypto
+    // Structure attendue : col A=Date, col B=Investi, col C=Valeur Totale
 
     const parseHistoRow = (row) => {
       const rawDate = t(row[0]);
-      const rawInv  = p(row[1]);  // col B = Investi €
-      const rawVal  = p(row[2]);  // col C = Valeur Totale €
-      const rawDepo = p(row[3]);  // col D = Dépôt Mois €
-      const rawPv   = p(row[4]);  // col E = Plus-Value €
-      const rawPerf = p(row[5]);  // col F = Perf Mensuelle %
-
+      const rawVal  = p(row[2]);  // col C = Valeur Totale (MUST be > 0 = real data)
+      const rawInv  = p(row[1]);  // col B = Investi
       if (!rawDate || rawDate.toUpperCase() === 'DATE' || rawDate.toUpperCase() === 'TOTAL') return null;
-      // Ignorer les lignes sans valeur totale (= mois futurs pas encore remplis)
       if (rawVal <= 0) return null;
 
-      // Parser la date — supporte DD/MM/YYYY, serial Excel, YYYY-MM-DD
       let dateObj = null;
       const serial = parseFloat(rawDate.replace(',', '.'));
       if (!isNaN(serial) && serial > 40000) {
-        // Numéro de série Excel → date
         dateObj = new Date(Math.round((serial - 25569) * 86400 * 1000));
       } else {
-        const parts = rawDate.split(/[\/\-\.]/);
-        if (parts.length >= 3) {
-          const d = parseInt(parts[0]), m = parseInt(parts[1]);
-          let y = parseInt(parts[2]);
-          if (y < 100) y += 2000; // 26 → 2026
-          // DD/MM/YYYY (format français)
-          dateObj = (d > 12) ? new Date(y, m - 1, d) : new Date(y, m - 1, d);
-          // Si ça donne une date invalide, essayer MM/DD/YYYY
-          if (isNaN(dateObj.getTime())) dateObj = new Date(y, d - 1, m);
+        const parts = rawDate.split(/[\/\-]/);
+        if (parts.length === 3) {
+          if (parts[0].length === 4) dateObj = new Date(parseInt(parts[0]), parseInt(parts[1])-1, parseInt(parts[2]));
+          else dateObj = new Date(parseInt(parts[2]), parseInt(parts[1])-1, parseInt(parts[0]));
         }
       }
       if (!dateObj || isNaN(dateObj.getTime())) return null;
-      if (dateObj > new Date()) return null; // ignorer mois futurs
-
-      return {
-        date:  dateObj,
-        val:   rawVal,   // Valeur Totale — source de vérité
-        inv:   rawInv,   // Investi cumulé
-        depo:  rawDepo,  // Dépôt du mois (= ta mise DCA)
-        pv:    rawPv,    // Plus-Value absolue (valTotale - investi)
-        perf:  rawPerf,  // Perf mensuelle en % (déjà calculée dans ton Sheet)
-      };
+      if (dateObj > new Date()) return null;
+      return { date: dateObj, val: rawVal, inv: rawInv };
     };
 
-    // ── Lecture prioritaire : onglet "Suivi Global" si existant, sinon "Suivi CTO 2026" ──
-    let suiviGlobalRows = await fetchTab('Suivi Global');
-    const suiviCtoRows  = await fetchTab('Suivi CTO 2026');
+    const histoByMonth = {};
+    const activeSources = new Set();
 
-    // Source principale : Global > CTO
-    const mainHistoRows = suiviGlobalRows || suiviCtoRows;
-
-    const histoPoints = [];
-    if (mainHistoRows) {
-      mainHistoRows.slice(1).forEach(row => {
+    const addToHisto = (rows, tabName) => {
+      if (!rows) return;
+      let hasData = false;
+      rows.slice(1).forEach(row => {
         const h = parseHistoRow(row);
         if (!h) return;
-        histoPoints.push({
-          date: h.date.toISOString().substring(0, 10),
-          val:  h.val,
-          inv:  h.inv,
-          depo: h.depo,
-          pv:   h.pv,
-          perf: h.perf,
-        });
+        hasData = true;
+        const key = `${h.date.getFullYear()}-${String(h.date.getMonth()+1).padStart(2,'0')}`;
+        if (!histoByMonth[key]) histoByMonth[key] = { val: 0, inv: 0, sources: new Set(), date: h.date };
+        histoByMonth[key].val += h.val;
+        histoByMonth[key].inv += h.inv;
+        histoByMonth[key].sources.add(tabName);
       });
-      // Trier par date croissante
-      histoPoints.sort((a, b) => a.date.localeCompare(b.date));
-    }
+      if (hasData) activeSources.add(tabName);
+    };
 
-    if (histoPoints.length > 0) {
+    // ── FETCH PARALLÈLE — tous les onglets en une seule salve réseau ──────
+    // Avant : 6 awaits séquentiels (~3s). Maintenant : 1 Promise.all (~1s).
+    // Note : suiviCtoRows est réutilisé pour les dividendes (pas de double fetch).
+    const [suiviCtoRows, suiviAirbusRows, suiviCryptoRows] = await Promise.all([
+      fetchTab('Suivi CTO 2026'),
+      fetchTab('Suivi Airbus'),
+      fetchTab('Suivi Crypto'),
+    ]);
+
+    addToHisto(suiviCtoRows,    'CTO');
+    addToHisto(suiviAirbusRows, 'Airbus');
+    addToHisto(suiviCryptoRows, 'Crypto');
+
+    // Only keep months where ALL active sources contributed
+    const nSources = activeSources.size || 1;
+    const newHistoPoints = Object.entries(histoByMonth)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .filter(([, v]) => v.sources.size >= nSources)
+      .map(([, v]) => ({
+        date: v.date.toISOString().substring(0, 10),
+        val:  v.val,
+        inv:  v.inv,
+      }));
+
+    if (newHistoPoints.length > 1) {
+      histoPoints = newHistoPoints;
       localStorage.setItem('patrimonia_histo', JSON.stringify(histoPoints));
-      console.log(`[Patrimonia] Historique chargé : ${histoPoints.length} points (${histoPoints[0]?.date} → ${histoPoints[histoPoints.length-1]?.date})`);
-    } else {
-      console.warn('[Patrimonia] Aucun point historique trouvé dans "Suivi CTO 2026" ou "Suivi Global"');
     }
 
-    // ── Optionnel : lire Airbus et Crypto pour un récap — mais NE PAS les ajouter au graphe global ──
-    const suiviAirbusRows = await fetchTab('Suivi Airbus');
-    const suiviCryptoRows = await fetchTab('Suivi Crypto');
-    // (ces données ne sont utilisées que si tu crées un "Suivi Global" séparé)
-
-    // DIVIDENDES — "Suivi CTO 2026" col I(8)=Date J(9)=Société K(10)=Montant L(11)=Div/action
-    // Réutilise suiviCtoRows déjà récupéré (évite une 2ème requête API inutile)
-    const divSourceRows = suiviCtoRows;
-    if (divSourceRows) {
-      const divs = [];
-      divSourceRows.slice(1).forEach(row => {
+    // DIVIDENDES — réutilise suiviCtoRows (déjà fetchté ci-dessus, pas de 2ème appel)
+    // col I(8)=Date J(9)=Société K(10)=Montant L(11)=Div/action
+    if (suiviCtoRows) {
+      const newDivs = [];
+      suiviCtoRows.slice(1).forEach(row => {
         const societe = t(row[9]); const montant = p(row[10]);
         if (!societe || societe.toUpperCase() === 'TOTAL' || montant <= 0) return;
         const serial = parseFloat(row[8]);
@@ -2051,12 +2052,17 @@ async function connectSheets(silent = false) {
         if (!isNaN(serial) && serial > 40000) {
           dateStr = new Date(Math.round((serial-25569)*86400*1000)).toLocaleDateString('fr-FR');
         } else { dateStr = t(row[8]); }
-        divs.push({ date:dateStr, ticker:societe, amount:montant, divPerShare:p(row[11]), source:'sheets' });
+        newDivs.push({ date:dateStr, ticker:societe, amount:montant, divPerShare:p(row[11]), source:'sheets' });
       });
-      if (divs.length) localStorage.setItem('patrimonia_dividends', JSON.stringify(divs));
+      if (newDivs.length) {
+        dividends = newDivs;
+        localStorage.setItem('patrimonia_dividends', JSON.stringify(dividends));
+      }
     }
 
-    saveLocalData(); initOverview();
+    _markDirty('assets', 'salary', 'histo', 'dividends');
+    saveLocalData(['assets', 'salary', 'histo', 'dividends']);
+    initOverview();
     const statusEl = document.getElementById('sheetsStatus');
     if (statusEl) { statusEl.textContent='Connecté'; statusEl.className='badge badge-up'; }
     const det = document.getElementById('dashboardDetected');
@@ -2155,10 +2161,12 @@ function disconnectSource(sourcePrefix, labelName) {
   if (sourcePrefix === 'sheets') {
     const det = document.getElementById('dashboardDetected');
     if (det) det.style.display = 'none';
+    histoPoints = []; dividends = [];
     localStorage.removeItem('patrimonia_histo');
     localStorage.removeItem('patrimonia_dividends');
     localStorage.removeItem('patrimonia_sheets_id');
     localStorage.removeItem('patrimonia_sheets_key');
+    localStorage.removeItem('patrimonia_snapshot_month');
     stopAutoSync();
   }
   showToast(`${removed} actif(s) supprimé(s) — ${labelName} déconnecté`, '#f59e0b');
@@ -2203,7 +2211,7 @@ function renderDisconnectButtons() {
 function saveSettings() {
   settings.currency=document.getElementById('currency')?.value||'EUR';
   settings.exposureThreshold=parseInt(document.getElementById('exposureThreshold')?.value)||20;
-  saveLocalData(); showToast('Paramètres sauvegardés ✓','#22c55e');
+  saveLocalData(['settings']); showToast('Paramètres sauvegardés ✓','#22c55e');
 }
 
 // ─── DIVIDENDES ──────────────────────────────────────────────────────────
@@ -2212,8 +2220,8 @@ function renderDividendsOverview() {
   const divEl = document.getElementById('dividendsOverview');
   if (!divEl) return;
 
-  let divs = [];
-  try { divs = JSON.parse(localStorage.getItem('patrimonia_dividends')||'[]'); } catch(e){}
+  // Utilise la variable globale chargée dans loadLocalData — pas de re-parse localStorage
+  const divs = dividends || [];
 
   // Aggregate dividends from history: group by ticker then by year
   const byTickerYear = {};
@@ -2461,9 +2469,16 @@ function handleImport(event) {
 
 function clearData() {
   if(!confirm('Réinitialiser toutes les données ? Action irréversible.')) return;
-  assets = []; savings = []; expenses = []; salaryData = {}; settings = { currency:'EUR', exposureThreshold:20 };
-  ['patrimonia_assets','patrimonia_savings','patrimonia_expenses','patrimonia_salary','patrimonia_settings','patrimonia_histo','patrimonia_dividends'].forEach(k=>localStorage.removeItem(k));
-  // Sync la réinitialisation vers Supabase
+  assets = []; savings = []; expenses = []; salaryData = {};
+  settings = { currency:'EUR', exposureThreshold:20 };
+  dividends = []; histoPoints = []; loansTracked = [];
+  _markDirty('assets','savings','expenses','salary','settings','histo','dividends');
+  [
+    'patrimonia_assets','patrimonia_savings','patrimonia_expenses',
+    'patrimonia_salary','patrimonia_settings','patrimonia_histo',
+    'patrimonia_dividends','patrimonia_loans','patrimonia_snapshot_month',
+    'patrimonia_sort','patrimonia_filter_src','patrimonia_filter_type',
+  ].forEach(k => localStorage.removeItem(k));
   saveToSupabase();
   initOverview(); renderDisconnectButtons();
   if (typeof renderPortfolio === 'function') renderPortfolio();
