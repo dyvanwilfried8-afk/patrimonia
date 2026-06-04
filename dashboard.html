@@ -919,6 +919,27 @@
       from { opacity: 0; transform: translateY(8px); }
       to   { opacity: 1; transform: translateY(0); }
     }
+
+    /* --- DEBUT AJOUT PRIVACY MODE --- */
+    .btn-privacy {
+      background: transparent;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: var(--text-color, #fff);
+      border-radius: 8px;
+      padding: 6px 10px;
+      cursor: pointer;
+      margin-left: 15px;
+    }
+    body.privacy-active .sensitive-value {
+      filter: blur(6px);
+      opacity: 0.7;
+      pointer-events: none;
+      user-select: none;
+    }
+    .sensitive-value {
+      transition: filter 0.3s ease, opacity 0.3s ease;
+    }
+    /* --- FIN AJOUT PRIVACY MODE --- */
   </style>
 </head>
 <body>
@@ -993,6 +1014,7 @@
       <div class="flex gap-12">
         <button class="hamburger" onclick="toggleSidebar()">☰</button>
         <div class="topbar-title" id="topbarTitle">Tableau de bord</div>
+        <button id="privacyToggleBtn" class="btn-privacy" onclick="togglePrivacyMode()" title="Masquer les montants">👁 Mode Public</button>
       </div>
       <div class="topbar-right">
         <span class="last-update" id="lastUpdate">–</span>
@@ -1044,10 +1066,10 @@
 
             <!-- Montant principal -->
             <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:4px;">
-              <div id="kpi-total" style="font-size:38px;font-weight:600;letter-spacing:-1.5px;line-height:1.1;color:var(--text);">–</div>
+              <div id="kpi-total" class="sensitive-value" style="font-size:38px;font-weight:600;letter-spacing:-1.5px;line-height:1.1;color:var(--text);">–</div>
               <div style="display:flex;flex-direction:column;gap:2px;">
                 <div style="display:flex;align-items:center;gap:8px;">
-                  <span id="kpi-pnl-inline" style="font-size:15px;font-weight:600;color:var(--green);">–</span>
+                  <span id="kpi-pnl-inline" class="sensitive-value" style="font-size:15px;font-weight:600;color:var(--green);">–</span>
                   <span id="kpi-pnl-pct-inline" class="badge badge-neutral" style="font-size:11px;">–</span>
                 </div>
                 <div style="font-size:10px;color:var(--muted2);">Plus-value latente</div>
@@ -1072,16 +1094,16 @@
               <div style="margin-bottom:8px;">
                 <div style="font-size:11px;color:var(--muted2);margin-bottom:4px;">Plus-value — <span id="perfPeriodLabel">Année en cours</span></div>
                 <div style="display:flex;align-items:center;gap:10px;">
-                  <div id="kpi-pnl" style="font-size:26px;font-weight:600;color:var(--red);">–</div>
+                  <div id="kpi-pnl" class="sensitive-value" style="font-size:26px;font-weight:600;color:var(--red);">–</div>
                   <span id="kpi-pnl-pct" class="badge badge-neutral" style="font-size:11px;">–</span>
                 </div>
                 <div style="font-size:11px;color:var(--muted2);margin-top:6px;line-height:1.5;">La plus-value latente est la variation de votre performance sur la période sélectionnée.</div>
               </div>
               <!-- Mini stats grille -->
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px;padding-top:14px;border-top:1px solid var(--border);">
-                <div><div style="font-size:10px;color:var(--muted2);">Aujourd'hui</div><div style="font-size:13px;font-weight:600;" id="statD1">–</div></div>
-                <div><div style="font-size:10px;color:var(--muted2);">Cette semaine</div><div style="font-size:13px;font-weight:600;" id="statW1">–</div></div>
-                <div><div style="font-size:10px;color:var(--muted2);">Ce mois</div><div style="font-size:13px;font-weight:600;" id="statM1">–</div></div>
+                <div><div style="font-size:10px;color:var(--muted2);">Aujourd'hui</div><div style="font-size:13px;font-weight:600;" id="statD1" class="sensitive-value">–</div></div>
+                <div><div style="font-size:10px;color:var(--muted2);">Cette semaine</div><div style="font-size:13px;font-weight:600;" id="statW1" class="sensitive-value">–</div></div>
+                <div><div style="font-size:10px;color:var(--muted2);">Ce mois</div><div style="font-size:13px;font-weight:600;" id="statM1" class="sensitive-value">–</div></div>
                 <div><div style="font-size:10px;color:var(--muted2);">YTD</div><div style="font-size:13px;font-weight:600;" id="statYtd">–</div></div>
               </div>
             </div>
@@ -1116,7 +1138,7 @@
             <div style="position:relative;width:200px;height:200px;">
               <canvas id="chartDonutOverview" width="200" height="200"></canvas>
               <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;">
-                <div id="donutTotal" style="font-size:20px;font-weight:600;letter-spacing:-0.5px;">–</div>
+                <div id="donutTotal" class="sensitive-value" style="font-size:20px;font-weight:600;letter-spacing:-0.5px;">–</div>
                 <div style="font-size:11px;color:var(--muted2);">Total</div>
               </div>
             </div>
@@ -2678,7 +2700,15 @@
     }
   </script>
 
-  <script src="app.js?v=5"></script>
+  <script>
+    function togglePrivacyMode() {
+      const isActive = document.body.classList.toggle('privacy-active');
+      const btn = document.getElementById('privacyToggleBtn');
+      if (btn) btn.textContent = isActive ? '🙈 Mode Privé' : '👁 Mode Public';
+    }
+  </script>
+
   <script src="portfolio-engine.js"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>
