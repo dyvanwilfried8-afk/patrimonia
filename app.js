@@ -2790,3 +2790,79 @@ async function forceClearCache() {
     window.location.reload(true);
   }
 }
+// =====================================================================
+// INTERFACE CONTROLLER : PRIVACY MODE & PORTFOLIO INJECTION V2
+// =====================================================================
+
+let isPrivacyEnabled = localStorage.getItem('patrimonia_privacy') === 'true';
+
+function initPrivacyMode() {
+  const body = document.body;
+  const btn = document.getElementById('privacyToggleBtn');
+  if (!btn) return;
+  
+  if (isPrivacyEnabled) {
+    body.classList.add('privacy-active');
+    btn.innerHTML = '🙈 Masqué';
+  } else {
+    body.classList.remove('privacy-active');
+    btn.innerHTML = '👁️ Mode Public';
+  }
+}
+
+function togglePrivacyMode() {
+  isPrivacyEnabled = !isPrivacyEnabled;
+  localStorage.setItem('patrimonia_privacy', isPrivacyEnabled);
+  initPrivacyMode();
+}
+
+/**
+ * Appelle le moteur financier et met à jour les éléments visuels du DOM
+ */
+async function updateDashboardV2(userId) {
+  if (!userId) return;
+  
+  try {
+    const summary = await getPortfolioSummary(userId);
+    
+    // Formatage des éléments ciblés
+    document.getElementById('valeurTotaleDisplay').textContent = formatterEUR.format(summary.portfolioValue);
+    document.getElementById('capitalInvestiDisplay').textContent = formatterEUR.format(summary.investedCapital);
+    
+    const pnlAbsoluEl = document.getElementById('pnlAbsoluDisplay');
+    const pnlRelatifEl = document.getElementById('pnlRelatifDisplay');
+    const ytdPerfEl = document.getElementById('ytdPerfDisplay');
+
+    pnlAbsoluEl.textContent = (summary.pnlAbsolu >= 0 ? '+' : '') + formatterEUR.format(summary.pnlAbsolu);
+    pnlRelatifEl.textContent = (summary.pnlRelatif >= 0 ? '+' : '') + summary.pnlRelatif.toFixed(2) + ' %';
+    ytdPerfEl.textContent = (summary.ytdPerf >= 0 ? '+' : '') + summary.ytdPerf.toFixed(2) + ' %';
+
+    // Application des couleurs dynamiques (Vert/Rouge doux)
+    const trendColor = summary.pnlAbsolu >= 0 ? '#22c55e' : '#ef4444';
+    const badgeBg = summary.pnlAbsolu >= 0 ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)';
+    const badgeText = summary.pnlAbsolu >= 0 ? '#4ade80' : '#f87171';
+
+    pnlAbsoluEl.style.color = trendColor;
+    pnlRelatifEl.style.color = badgeText;
+    pnlRelatifEl.style.backgroundColor = badgeBg;
+    
+    ytdPerfEl.style.color = summary.ytdPerf >= 0 ? '#22c55e' : '#ef4444';
+
+  } catch (err) {
+    console.error("Erreur d'injection visuelle V2 :", err);
+  }
+}
+
+// Liaison avec les hooks de chargement existants
+document.addEventListener('DOMContentLoaded', () => {
+  initPrivacyMode();
+  
+  // Si un utilisateur Supabase est déjà connecté dans app.js, on force la mise à jour
+  if (sb && sb.auth) {
+    sb.auth.getUser().then(({ data }) => {
+      if (data && data.user) {
+        updateDashboardV2(data.user.id);
+      }
+    });
+  }
+});
