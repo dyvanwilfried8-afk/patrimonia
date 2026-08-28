@@ -100,7 +100,7 @@ function showToast(msg, color) {
 
 const PAGE_TITLES = {
   overview:'Tableau de bord', portfolio:'Portefeuille', savings:'Épargne bancaire',
-  salary:'Salaire & Budget', projection:'Projection DCA', analysis:'Analyse complète',
+  salary:'Salaire & Budget', projection:'Projection DCA', analysis:'Analyse complète', benchmarks:'Benchmarks',
   fees:'Scanner de frais', fiscalite:'Fiscalité', sources:'Connexions', settings:'Paramètres',
   loan:'Simulation de prêt'
 };
@@ -126,6 +126,7 @@ function navigate(pageId) {
   });
   if (pageId === 'projection') updateProjection();
   if (pageId === 'analysis')   { computeDiversityScore(); renderAnalysisPage(); }
+  if (pageId === 'benchmarks') renderBenchmarks();
   if (pageId === 'fees')       renderFees();
   if (pageId === 'savings')    renderSavings();
   if (pageId === 'salary')     renderSalary();
@@ -811,6 +812,82 @@ let currentHistoPeriod = 'YTD';
 // loadHistoPoints — wrapper pour compatibilité ; retourne la variable globale en mémoire
 function loadHistoPoints() {
   return histoPoints || [];
+}
+
+// ─── COMPARAISON AUX INDICES ───────────────────────────────────────────
+// URTH est utilisé comme proxy coté pour MSCI World, faute d'API publique MSCI libre.
+const BENCHMARKS = {
+  sp500:  { label:'S&P 500', symbol:'^GSPC', color:'#60a5fa' },
+  nasdaq: { label:'Nasdaq-100', symbol:'^NDX', color:'#a78bfa' },
+  msci:   { label:'MSCI World (ETF)', symbol:'URTH', color:'#34d399' },
+  stoxx:  { label:'Euro Stoxx 50', symbol:'^STOXX50E', color:'#fbbf24' },
+  cac:    { label:'CAC 40', symbol:'^FCHI', color:'#fb7185' }
+};
+let selectedBenchmarks = ['sp500','nasdaq','msci'];
+let chartBenchmarksInstance = null;
+
+function renderBenchmarkChoices() {
+  const box = document.getElementById('benchmarkChoices');
+  if (!box) return;
+  box.innerHTML = Object.entries(BENCHMARKS).map(([key, item]) => {
+    const active = selectedBenchmarks.includes(key);
+    return `<button class="btn ${active ? 'btn-accent' : 'btn-ghost'}" style="width:auto;margin:0;padding:7px 11px;font-size:11px;" onclick="toggleBenchmark('${key}')">${active ? '✓ ' : ''}${item.label}</button>`;
+  }).join('');
+}
+
+function toggleBenchmark(key) {
+  selectedBenchmarks = selectedBenchmarks.includes(key) ? selectedBenchmarks.filter(k => k !== key) : [...selectedBenchmarks, key];
+  renderBenchmarks();
+}
+
+function getPortfolioBenchmarkPoints(period) {
+  // Rapport valeur / capital investi : les nouveaux versements n'apparaissent pas comme de la performance.
+  const raw = filterHistoByPeriod(loadHistoPoints(), period).filter(p => p.date && Number(p.val) > 0).map(p => ({ date:p.date.slice(0,10), value:Number(p.val) / Math.max(Number(p.inv || p.val), 1) }));
+  const current = assets.filter(a => !a.isESOPCopy).reduce((sum, a) => sum + assetValue(a), 0) + savings.reduce((sum, s) => sum + Number(s.balance || 0), 0);
+  const invested = assets.filter(a => !a.isESOPCopy).reduce((sum, a) => sum + assetCost(a), 0) + savings.reduce((sum, s) => sum + Number(s.balance || 0), 0);
+  const today = new Date().toISOString().slice(0,10);
+  if (current > 0 && invested > 0 && (!raw.length || raw[raw.length - 1].date !== today)) raw.push({ date:today, value:current / invested });
+  return raw.sort((a,b) => a.date.localeCompare(b.date));
+}
+
+async function fetchBenchmarkHistory(symbol, fromDate) {
+  const start = Math.floor(new Date(fromDate + 'T00:00:00').getTime() / 1000);
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${start}&period2=${Math.floor(Date.now()/1000)}&interval=1d&events=history`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error('donnée indisponible');
+  const result = (await response.json())?.chart?.result?.[0];
+  const closes = result?.indicators?.quote?.[0]?.close || [];
+  return (result?.timestamp || []).map((ts, i) => ({ date:new Date(ts * 1000).toISOString().slice(0,10), value:closes[i] })).filter(p => Number.isFinite(p.value));
+}
+
+function valueOnOrBefore(points, date) { for (let i=points.length-1; i>=0; i--) if (points[i].date <= date) return points[i].value; return null; }
+function normalisePoints(points, labels) { const base=points[0]?.value; return !base ? labels.map(() => null) : labels.map(date => { const value=valueOnOrBefore(points,date); return value===null ? null : +(value/base*100).toFixed(2); }); }
+
+async function renderBenchmarks() {
+  renderBenchmarkChoices();
+  const status=document.getElementById('benchmarkStatus'), cards=document.getElementById('benchmarkCards'), canvas=document.getElementById('chartBenchmarks');
+  if (!canvas || !cards) return;
+  const period=document.getElementById('benchmarkPeriod')?.value || 'TOUT', portfolio=getPortfolioBenchmarkPoints(period);
+  if (portfolio.length < 2) {
+    if (chartBenchmarksInstance) chartBenchmarksInstance.destroy();
+    cards.innerHTML='<div class="panel" style="grid-column:1/-1;color:var(--muted2);">Ajoutez au moins deux points d’historique de portefeuille pour lancer la comparaison.</div>';
+    if(status){status.textContent='Historique requis';status.className='badge badge-neutral';} return;
+  }
+  if(status){status.textContent='Chargement des marchés…';status.className='badge badge-neutral';}
+  const startDate=portfolio[0].date, chosen=selectedBenchmarks.map(key => ({key,...BENCHMARKS[key]}));
+  const results=await Promise.allSettled(chosen.map(item => fetchBenchmarkHistory(item.symbol,startDate)));
+  const loaded=chosen.map((item,i)=>({...item,points:results[i].status==='fulfilled'?results[i].value:[]})).filter(item=>item.points.length>1);
+  const labels=[...new Set([...portfolio.map(p=>p.date),...loaded.flatMap(item=>item.points.map(p=>p.date))])].filter(date=>date>=startDate).sort();
+  const portfolioNorm=normalisePoints(portfolio,labels);
+  const datasets=[{label:'Mon portefeuille',data:portfolioNorm,borderColor:'#f8fafc',fill:false,tension:.25,pointRadius:0,borderWidth:3}];
+  loaded.forEach(item=>datasets.push({label:item.label,data:normalisePoints(item.points,labels),borderColor:item.color,fill:false,tension:.2,pointRadius:0,borderWidth:2}));
+  if(chartBenchmarksInstance)chartBenchmarksInstance.destroy();
+  chartBenchmarksInstance=new Chart(canvas.getContext('2d'),{type:'line',data:{labels,datasets},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{labels:{color:getComputedStyle(document.documentElement).getPropertyValue('--muted2'),boxWidth:12,font:{size:11}}},tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)}`}}},scales:{x:{ticks:{color:getComputedStyle(document.documentElement).getPropertyValue('--muted2'),maxTicksLimit:7,font:{size:10}},grid:{display:false}},y:{ticks:{color:getComputedStyle(document.documentElement).getPropertyValue('--muted2'),callback:v=>v.toFixed(0)},grid:{color:'rgba(255,255,255,.06)'}}}}});
+  const finalPortfolio=portfolioNorm.filter(v=>v!==null).at(-1)||100, performance=v=>(v-100).toFixed(2);
+  const portfolioCard=`<div class="panel"><div class="kpi-label">Mon portefeuille</div><div class="kpi-value" style="color:${finalPortfolio>=100?'var(--green)':'var(--danger)'}">${finalPortfolio>=100?'+':''}${performance(finalPortfolio)}%</div><div class="kpi-sub">Base 100 au ${startDate.split('-').reverse().join('/')}</div></div>`;
+  const indexCards=loaded.map(item=>{const end=normalisePoints(item.points,labels).filter(v=>v!==null).at(-1)||100,gap=finalPortfolio-end;return `<div class="panel"><div class="kpi-label">${item.label}</div><div class="kpi-value" style="color:${end>=100?'var(--green)':'var(--danger)'}">${end>=100?'+':''}${performance(end)}%</div><div class="kpi-sub" style="color:${gap>=0?'var(--green)':'var(--danger)'}">Écart : ${gap>=0?'+':''}${gap.toFixed(2)} pts</div></div>`;}).join('');
+  cards.innerHTML=portfolioCard+indexCards+(!loaded.length?'<div class="panel">Aucune donnée de marché n’a pu être chargée. Vérifiez votre connexion puis réessayez.</div>':'');
+  if(status){status.textContent=loaded.length?`${loaded.length} indice${loaded.length>1?'s':''} chargé${loaded.length>1?'s':''}`:'Données indisponibles';status.className=loaded.length?'badge badge-up':'badge badge-down';}
 }
 
 // Filter histo points by period
@@ -2445,7 +2522,7 @@ function updateLoanCalc() {
 
 function exportData() {
   const blob=new Blob([JSON.stringify({assets,savings,expenses,salaryData,settings},null,2)],{type:'application/json'});
-  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='patrimonia_export.json'; a.click();
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='my-investbook_export.json'; a.click();
 }
 
 function importData() { document.getElementById('importFile')?.click(); }
